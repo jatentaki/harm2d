@@ -14,10 +14,10 @@ def list_available_files(dir, ext):
     return sorted(images)[::-1]
 
 
-
 class DriveDataset:
     def __init__(self, path, training=True, img_transform=T.ToTensor(),
-                 mask_transform=T.ToTensor(), label_transform=T.ToTensor()):
+                 mask_transform=T.ToTensor(), label_transform=T.ToTensor(),
+                 bloat=1):
         self.training = training
 
         self.subdir = 'training' if training else 'test'
@@ -31,41 +31,42 @@ class DriveDataset:
 
         regex = re.compile('^(\d+)_' + self.subdir + '\.tif$')
 
-        self.ids = []
+        self.samples = []
         for file in os.listdir(self.img_p):
-            print(file)
             m = regex.match(file)
             if m:
                 id = int(m.group(1))
-                self.ids.append(id)
+                id = id if self.training else str(id).zfill(2)
+
+                img = self.fetch_img(id)
+                mask = self.fetch_mask(id)
+                label = self.fetch_label(id)
+
+                self.samples.append((img, mask, label))
+
+        self.samples = self.samples * bloat
+
 
     def fetch_label(self, id):
         fmt = self.anno_p + os.path.sep + '{}_manual1.gif'
-        id = id if self.training else str(id).zfill(2)
         path = fmt.format(id)
         return Image.fromarray(imageio.imread(path), mode='L')
 
     def fetch_mask(self, id):
         fmt = self.mask_p + os.path.sep + '{}_' + self.subdir + '_mask.gif'
-        id = id if self.training else str(id).zfill(2)
         path = fmt.format(id)
         return Image.fromarray(imageio.imread(path), mode='L')
 
     def fetch_img(self, id):
         fmt = self.img_p + os.path.sep + '{}_' + self.subdir + '.tif'
-        id = id if self.training else str(id).zfill(2)
         path = fmt.format(id)
         return Image.fromarray(imageio.imread(path))
 
     def __len__(self):
-        return len(self.ids)
+        return len(self.samples)
     
     def __getitem__(self, idx):
-        id = self.ids[idx]
-
-        img = self.fetch_img(id)
-        mask = self.fetch_mask(id)
-        label = self.fetch_label(id)
+        img, mask, label = self.samples[idx]
 
         if self.img_transform:
             img = self.img_transform(img)

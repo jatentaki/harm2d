@@ -1,4 +1,4 @@
-import torch, argparse, functools, itertools, os
+import torch, argparse, functools, itertools, os, warnings, imageio
 import torch.nn.functional as F
 import torchvision as tv
 import numpy as np
@@ -41,7 +41,6 @@ def save_checkpoint(epoch, score, model, optim, path=None, fname=None):
     fname = fname if fname else 'epoch{}.pth.tar'.format(epoch)
     torch.save(cp, path + os.path.sep + fname)
 
-
 def load_model(network, path):
     if path is not None:
         load = torch.load(path)
@@ -55,30 +54,25 @@ def inspect(network, loader, path, early_stop=None, criteria=[]):
     maybe_make_dir(path)
 
     with tqdm(total=len(loader), dynamic_ncols=True) as progress, torch.no_grad():
-        for i, (input, target) in enumerate(loader):
+        for i, (input, mask, target) in enumerate(loader):
             if i == early_stop:
                 break
 
-            fname = target['fname']
-            input = input['t'].cuda()
-            target = target['t'].cuda()
+            if torch.cuda.is_available():
+                input = input.cuda()
 
             prediction = network(input)
 
-            if criteria:
-                scores = {c.name: c(prediction, target, input) for c in criteria}
-                eval_name = path + 'eval{}.txt'.format(i)
-                with open(eval_name, 'w') as f:
-                    f.write(fname[0] + ' ' + print_dict(scores))
+#            if criteria:
+#                scores = {c.name: c(prediction, target, input) for c in criteria}
+#                eval_name = path + 'eval{}.txt'.format(i)
+#                with open(eval_name, 'w') as f:
+#                    f.write(fname[0] + ' ' + print_dict(scores))
 
-            pred_name = path + 'pred{}.nrrd'.format(i)
-            nrrd.write(pred_name, prediction.cpu().numpy())
-
-            img_name = path + 'img{}.nrrd'.format(i)
-            nrrd.write(img_name, input.cpu().numpy()) 
-
-            lbl_name = path + 'lbl{}.nrrd'.format(i)
-            nrrd.write(lbl_name, target.cpu().numpy())
+            pred_name = path + 'pred{}.npy'.format(i)
+            heatmap = torch.sigmoid(prediction)
+            heatmap = heatmap.cpu()[0, 0].numpy()
+            np.save(pred_name, heatmap)
 
             progress.update(1)
 
@@ -90,6 +84,10 @@ if __name__ == '__main__':
     parser.add_argument('model', choices=['harmonic', 'baseline'])
     parser.add_argument('action', choices=['train', 'evaluate', 'inspect'])
 
+    parser.add_argument('-tot', '--test-on-train', action='store_true',
+                        help='Run evaluation and inspection on training set')
+    parser.add_argument('--bloat', type=int, default=50, metavar='N',
+                        help='Process N times the dataset per epoch')
     parser.add_argument('--load', metavar='FILE', default=None, type=str,
                         help='load an existing model')
     parser.add_argument('-j', '--workers', metavar='N', default=1, type=int,
@@ -129,35 +127,52 @@ if __name__ == '__main__':
             tv.transforms.ToTensor()
         ])
 
+        warnings.simplefilter("ignore")
+        logger.add_msg('Ignoring warnings')
+
         train_data = loader.DriveDataset(
             args.data_path, training=True, img_transform=transform,
-            mask_transform=transform, label_transform=transform
+            mask_transform=transform, label_transform=transform,
+            bloat=args.bloat
         )
         train_loader = DataLoader(
             train_data, batch_size=args.batch_size, shuffle=True, num_workers=args.workers
         )
 
-        val_data = loader.DriveDataset(
-            args.data_path, training=False, img_transform=transform,
-            mask_transform=transform, label_transform=transform
-        )
+        if args.test_on_train:
+            val_data = loader.DriveDataset(
+                args.data_path, training=True, img_transform=transform,
+                mask_transform=transform, label_transform=transform,
+                bloat=1
+            )
+        else:
+            val_data = loader.DriveDataset(
+                args.data_path, training=False, img_transform=transform,
+                mask_transform=transform, label_transform=transform
+            )
+
         val_loader = DataLoader(
             val_data, batch_size=args.batch_size, shuffle=False, num_workers=args.workers
         )
 
         if args.model == 'baseline':
-            dimensions = [3, 8, 16, 32]
+            dimensions = [3, 16, 32, 64]
             network = Unet(
                 dimensions=dimensions, momentum=.1
             )
         elif args.model == 'harmonic':
-            layout = [
-                (1, ),
-                (8, 6, 6),
-                (12, 4, 2),
-                (8, 2, 2,)
+            down = [
+                (3, ),
+                (2, 5, 2),
+                (5, 7, 5),
             ]
-            network = HUnet(down=layout)
+            mid = (10, 14, 10)
+            up = [
+                (5, 7, 5),
+                (2, 5, 2),
+                (1, )
+            ]
+            network = HUnet(down=down, mid=mid, up=up)
 
         cuda = torch.cuda.is_available()
 
@@ -182,9 +197,9 @@ if __name__ == '__main__':
 
         criteria = [loss_fn]
 
-#        if args.baseline:
-#            example = next(iter(train_loader))[0]['t'].cuda()
-#            network = torch.jit.trace(network, example)
+        if args.model == 'baseline':
+            example = next(iter(train_loader))[0].cuda()
+            network = torch.jit.trace(network, example)
 
         if args.load:
             start_epoch, best_score, model_dict, optim_dict = load_checkpoint(args.load)

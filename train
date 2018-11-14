@@ -1,2 +1,0 @@
-#! /usr/bin/env python
-python segmentation.py dataset artifacts baseline train

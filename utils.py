@@ -1,15 +1,15 @@
 import time, functools, torch, os
 import numpy as np
 
-def upsample(inp, scale_factor=2, mode='bilinear', align_corners=False):
-    if not inp.dim() == 4:
+def upsample(inp, scale_factor=2, mode='trilinear', align_corners=False):
+    if not inp.dim() == 5:
         fmt = 'Attempting to upscale a tensor of shape {}'
         msg = fmt.format(inp.size())
         raise ValueError(msg)
 
     return torch.nn.functional.interpolate(
         inp, scale_factor=scale_factor,
-        mode=mode, align_corners=False
+        mode='trilinear', align_corners=False
     )
 
 def time_it(return_tuple=False):
@@ -92,18 +92,18 @@ def unrotate(t):
     return rotate(rotate(rotate(t)))
 
 
-def cut_to_match(reference, t):
+def cut_to_match(reference, t, n_pref=2):
     '''
     Slice tensor `t` along spatial dimensions to match `reference`, by
-    picking the central region
+    picking the central region. Ignores first `n_pref` axes
     '''
 
-    if reference.size()[2:] == t.size()[2:]:
+    if reference.size()[n_pref:] == t.size()[n_pref:]:
         # sizes match, no slicing necessary
         return t
 
     # compute the difference along all spatial axes
-    diffs = [s - r for s, r in zip(t.size()[2:], reference.size()[2:])]
+    diffs = [s - r for s, r in zip(t.size()[n_pref:], reference.size()[n_pref:])]
 
     # check if diffs are even, which is necessary if we want a truly centered crop
     if not all(d % 2 == 0 for d in diffs) and all(d >= 0 for d in diffs):
@@ -112,7 +112,7 @@ def cut_to_match(reference, t):
         raise RuntimeError(msg)
 
     # pick the full extent of `batch` and `feature` axes
-    slices = [slice(None, None), slice(None, None)] 
+    slices = [slice(None, None)] * n_pref
 
     # for all remaining pick between diff//2 and size-diff//2
     for d in diffs:

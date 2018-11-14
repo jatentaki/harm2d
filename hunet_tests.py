@@ -2,7 +2,7 @@ import unittest, torch
 
 from harmonic.cmplx import from_real
 
-from hunet import HUnet, UnetMiddleBlock
+from hunet import HUnet, UnetMiddleBlock, UnetDownBlock, UnetUpBlock
 
 def rot90(x, k=1, plane=(2, 3)):
     if k == 0:
@@ -16,7 +16,7 @@ def rot90(x, k=1, plane=(2, 3)):
     else:
         raise ValueError("k={} is invalid".format(k))
 
-class Tests(unittest.TestCase):
+class EquivarianceTests(unittest.TestCase):
     def _diff_rotation(self, net, inp, plane):
         rotation = lambda t: rot90(t, plane=plane)
 
@@ -27,17 +27,12 @@ class Tests(unittest.TestCase):
 
         return (rotation(base_fwd) - rot_fwd).max().item()
 
-    def _test_selective_equivariance(self, net, inp):
-        diff = self._diff_rotation(net, inp, plane=(3, 4))
+    def _test_equivariance(self, net, inp, real=False):
+        plane = (3, 4) if real else (2, 3)
+        diff = self._diff_rotation(net, inp, plane=plane)
         self.assertLess(diff, 1e-5)
 
-        diff = self._diff_rotation(net, inp, plane=(2, 4))
-        self.assertGreater(diff, 1)
-
-        diff = self._diff_rotation(net, inp, plane=(2, 3))
-        self.assertGreater(diff, 1)
-
-    def _test_equivariant_output(self, net_builder, train=True, real=False):
+    def _test_equivariant_output(self, net_builder, train=True, real=False, ins=1):
         import torch.backends.cudnn as cudnn
         cudnn.deterministic = True
 
@@ -53,36 +48,115 @@ class Tests(unittest.TestCase):
             net.eval()
 
         s = 92
-        input = torch.randn(2, 1, s, s, s).cuda()
+        input = torch.randn(2, ins, s, s).cuda()
 
         if real:
             input = from_real(input)
 
         with torch.no_grad():
-            self._test_selective_equivariance(net, input)
+            self._test_equivariance(net, input, real=real)
 
+
+class DownBlockTests(EquivarianceTests):
+    def _build_block(self):
+        class TwoBlocks(torch.nn.Module):
+            def __init__(self):
+                super(TwoBlocks, self).__init__()
+
+                self.b1 = UnetDownBlock((1, ), (2, 3))
+                self.b2 = UnetDownBlock((2, 3), (1, ))
+
+            def forward(self, x):
+                return self.b2(self.b1(x))
+
+        return TwoBlocks()
+
+    def test_equivariance_down_block(self):
+        self._test_equivariant_output(self._build_block, real=True)
+
+    def test_equivariance_down_block_eval(self):
+        self._test_equivariant_output(self._build_block, train=False, real=True)
+
+class UpBlockTests(EquivarianceTests):
+    def _build_block(self):
+        class ThreeBlocks(torch.nn.Module):
+            def __init__(self):
+                super(ThreeBlocks, self).__init__()
+
+                bottom = (4, 5, 6)
+                horizontal = (2, 3)
+
+                self.block_bottom = UnetDownBlock((1, ), bottom)
+                self.block_horizontal = UnetDownBlock((1, ), horizontal)
+
+                self.up = UnetUpBlock(bottom, horizontal, (1, ))
+
+            def forward(self, x):
+                b = self.block_bottom(x)
+                h = self.block_horizontal(x)
+
+                return self.up(b, h)
+
+        return ThreeBlocks()
+
+    def test_equivariance_up_block(self):
+        self._test_equivariant_output(self._build_block, real=True)
+
+    def test_equivariance_up_block_eval(self):
+        self._test_equivariant_output(self._build_block, train=False, real=True)
+
+
+class MiddleBlockTests(EquivarianceTests):
     def test_equivariance_middle_block(self):
         builder = lambda : UnetMiddleBlock((1,), (2, 5, 3), (1,))
         self._test_equivariant_output(builder, real=True)
-
-    def test_equivariance_unet(self):
-        builder = lambda : HUnet()
-        self._test_equivariant_output(builder)
 
     def test_equivariance_middle_block_eval(self):
         builder = lambda : UnetMiddleBlock((1,), (2, 5, 3), (1,))
         self._test_equivariant_output(builder, train=False, real=True)
     
-    def test_equivariance_unet_eval(self):
+class AsymmMiddleBlockTests(EquivarianceTests):
+    def _build_block(self):
+        class ThreeBlocks(torch.nn.Module):
+            def __init__(self):
+                super(ThreeBlocks, self).__init__()
+
+                a = (2, 3)
+                b = (5, 2)
+                c = (3, 3)
+
+                self.d1 = UnetDownBlock((1, ), a)
+                self.mid = UnetMiddleBlock(a, b, c)
+                self.d2 = UnetDownBlock(c, (1, ))
+
+            def forward(self, x):
+                return self.d2(self.mid(self.d1(x)))
+
+        return ThreeBlocks()
+
+    def test_equivariance_middle_block(self):
+        self._test_equivariant_output(self._build_block, real=True)
+ 
+
+class HunetTests(EquivarianceTests):
+    def test_equivariance_unet(self):
         builder = lambda : HUnet()
-        self._test_equivariant_output(builder, train=False)
+        self._test_equivariant_output(builder)
 
     def test_equivariance_unet_asymm(self):
         down = [(1,), (4, 2, 2), (3, 3, 1)]
-        mid = (2,)
-        up = [(2, 3, 2), (2, 4, 3), (1,)]
+        mid = (2, 3)
+        up = [(3, 2, 1), (4, 2, 2), (1, )]
 
         builder = lambda : HUnet(down=down, mid=mid, up=up)
         self._test_equivariant_output(builder)
+
+    def test_equivariance_unet_asymm_inp(self):
+        down = [(3,), (4, 2, 2), (3, 3, 1)]
+        mid = (2, 3)
+        up = [(3, 3, 1), (4, 2, 2), (1, )]
+
+        builder = lambda : HUnet(down=down, mid=mid, up=up)
+        self._test_equivariant_output(builder, ins=3)
 
 unittest.main()
