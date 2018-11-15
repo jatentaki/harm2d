@@ -8,27 +8,6 @@ class Criterion(nn.Module):
         super(Criterion, self).__init__()
         self.name = name if name is not None else type(self).__name__
 
-class Dice(Criterion):
-    def __init__(self, name=None, threshold=0.5, eps=1e-4):
-        super(Dice, self).__init__(name=name)
-        self.threshold = threshold 
-        self.eps = eps
-
-    def forward(self, x, target, _img):
-        positives = (torch.sigmoid(x) > self.threshold)
-        target, mask = mateusz_to_target_and_mask(target)
-
-        positives = positives[mask]
-        target = target[mask]
-
-        true_positives = (positives & target).to(torch.float32).sum()
-        p_s = positives.to(torch.float32).sum()
-        t_s = target.to(torch.float32).sum()
-
-        dice = (2 * true_positives + self.eps) / (p_s + t_s + self.eps)
-        return dice.mean()
-
-
 class Tableau4(Criterion):
     def __init__(self, name='TP FP TN FN', threshold=0.5):
         super(Tableau4, self).__init__()
@@ -49,55 +28,51 @@ class Tableau4(Criterion):
 
         return np.array([i.sum().item() for i in [tp, fp, tn, fn]])
 
-class Histogrammer:
-    def __init__(self, bins=20):
-        self.n = 0
-        self.bins = bins
-        self.thresholds = np.linspace(0, 1, bins)
-        self.trues = np.zeros(bins)
-        self.falses = np.zeros(bins)
+class PrecRec(Criterion):
+    def __init__(self, n_thresholds=10):
+        self.n_thresholds = n_thresholds
+        self.thresholds = torch.linspace(0, 1, n_thresholds + 2)[1:-1]
+        self.classes = torch.zeros(4, n_thresholds, dtype=torch.int64)
 
-    @utils.size_adaptive
-    def __call__(self, pred, target, _img):
-        target, mask = mateusz_to_target_and_mask(target)
-        target, pred = target[mask], pred[mask]
+    def __call__(self, prediction, mask, target):
+        for i, threshold in enumerate(self.thresholds):
+            positive = torch.sigmoid(prediction) > threshold
 
-        probs = torch.sigmoid(pred).cpu()
-        target = target.cpu() 
+            positive = positive[mask]
+            target = target[mask]
 
-        true = torch.histc(
-            probs[target], bins=self.bins, min=self.thresholds[0], max=self.thresholds[-1]
-        ).numpy()
-        false = torch.histc(
-            probs[~target], bins=self.bins, min=self.thresholds[0], max=self.thresholds[-1]
-        ).numpy()
+            tp = positive & target
+            fp = positive & ~target
+            tn = ~positive & ~target
+            fn = ~positive & target
 
+            results = torch.tensor(
+                [arr.sum().item() for arr in [tp, fp, tn, fn]],
+                dtype=torch.int64
+            )
+            
+            self.classes[:, i] += results
 
-        avg_true = self.trues * self.n + true
-        avg_false = self.falses * self.n + false
+    def tp(self):
+        return self.classes[0]
 
-        self.n += 1
+    def fp(self):
+        return self.classes[1]
 
-        self.trues = avg_true / self.n
-        self.falses = avg_false / self.n
+    def tn(self):
+        return self.classes[2]
 
+    def fn(self):
+        return self.classes[3]
 
-if __name__ == '__main__':
-    import nrrd
-    from losses import SizeAdaptiveLoss
+    def prec_rec(self):
+        prec = self.tp() / (self.tp() + self.fp())
+        rec = self.tp() / (self.tp() + self.fn())
 
-    def r(p):
-        v, _ = nrrd.read(p + '.nrrd')
-        return v
+        return prec, rec
 
-    pred = r('pred')
-    img = r('img')
-    lbl = r('lbl')
+    def best_f1(self):
+        prec, rec = self.prec_rec()
+        f1 = 2 * prec * rec / (prec + rec)
 
-    lbl = torch.from_numpy(lbl)
-    pred = torch.from_numpy(pred)
-
-    loss_fn = SizeAdaptiveLoss(Dice())
-    loss = loss_fn(pred, lbl)
-
-    print(loss)
+        return f1.max().item()

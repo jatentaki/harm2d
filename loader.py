@@ -3,17 +3,6 @@ import torchvision as tv
 import torchvision.transforms as T
 from PIL import Image
 
-def list_available_files(dir, ext):
-    dir = os.path.expanduser(dir)
-    cut = len(ext)
-    images = [fname[:-cut] for fname in os.listdir(dir)
-              if fname.endswith(ext)]
-
-    # sort to make ordering comparable (os.listdir does not provide
-    # any reliable ordering)
-    return sorted(images)[::-1]
-
-
 class DriveDataset:
     def __init__(self, path, training=True, img_transform=T.ToTensor(),
                  mask_transform=T.ToTensor(), label_transform=T.ToTensor(),

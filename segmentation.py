@@ -105,6 +105,8 @@ if __name__ == '__main__':
     parser.add_argument('--restart-checkpoint', action='store_true',
                         help='consider a loaded checkpoint to be epoch 0 with 0' + \
                         'best performance')
+    parser.add_argument('-i', '--iteration', default=0, type=int,
+                        help='variable for automatic parameter sweeps')
 
     args = parser.parse_args()
     
@@ -161,18 +163,12 @@ if __name__ == '__main__':
                 dimensions=dimensions, momentum=.1
             )
         elif args.model == 'harmonic':
-            down = [
-                (3, ),
-                (2, 5, 2),
-                (5, 7, 5),
-            ]
-            mid = (10, 14, 10)
-            up = [
-                (5, 7, 5),
-                (2, 5, 2),
-                (1, )
-            ]
-            network = HUnet(down=down, mid=mid, up=up)
+            from setups import setups
+            setup = setups[args.iteration]            
+            network = HUnet(down=setup.down, mid=setup.mid, up=setup.up)
+            desc = 'Setup {}'.format(setup.desc)
+            print(desc)
+            logger.add_msg(desc)
 
         cuda = torch.cuda.is_available()
 
@@ -221,7 +217,9 @@ if __name__ == '__main__':
                 criteria=criteria, early_stop=args.early_stop
             )
         elif args.action == 'evaluate':
-            test(network, val_loader, criteria, logger=logger, callbacks=[]) 
+            callbacks = [criteria.PrecRec()]
+            test(network, val_loader, criteria, logger=logger, callbacks=callbacks)
+            print('Best f1', callbacks[0].best_f1())
 
         elif args.action == 'train':
             scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
