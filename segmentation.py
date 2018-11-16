@@ -168,12 +168,7 @@ if __name__ == '__main__':
                 dimensions=dimensions, momentum=.1
             )
         elif args.model == 'harmonic':
-            from setups import setups
-            setup = setups[args.iteration]            
-            network = HUnet(down=setup.down, mid=setup.mid, up=setup.up)
-            desc = 'Setup {}'.format(setup.desc)
-            print(desc)
-            logger.add_msg(desc)
+            network = HUnet(in_features=3)
 
         cuda = torch.cuda.is_available()
 

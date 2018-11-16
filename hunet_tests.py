@@ -123,17 +123,17 @@ class HunetTests(EquivarianceTests):
         self._test_equivariant_output(builder)
 
     def test_equivariance_unet_asymm(self):
-        down = [(1,), (4, 2, 2), (3, 3, 1), (2, 3)]
-        up = [(3, 2, 1), (4, 2, 2), (1, )]
+        down = [(4, 2, 2), (3, 3, 1), (2, 3)]
+        up = [(3, 2, 1), (8, )]
 
         builder = lambda : HUnet(down=down, up=up)
         self._test_equivariant_output(builder)
 
     def test_equivariance_unet_asymm_3_input_channels(self):
-        down = [(3,), (4, 2, 2), (3, 3, 1), (2, 3)]
-        up = [(3, 3, 1), (4, 2, 2), (1, )]
+        down = [(4, 2, 2), (3, 3, 1), (2, 3)]
+        up = [(3, 3, 1), (8, )]
 
-        builder = lambda : HUnet(down=down, up=up)
+        builder = lambda : HUnet(in_features=3, down=down, up=up)
         self._test_equivariant_output(builder, ins=3)
 
-unittest.main()
+unittest.main(failfast=True)

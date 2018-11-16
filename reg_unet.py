@@ -69,7 +69,7 @@ class UnetDownBlock(nn.Module):
         return y_gated, y
 
 
-    def __repr__(self):
+    def __str__(self):
         fmt = 'UnetDownBlock ({}) {} -> {}'
         msg = fmt.format(self.name, self.in_, self.out_)
         return msg
@@ -103,7 +103,7 @@ class UnetUpBlock(nn.Module):
         return y
 
 
-    def __repr__(self):
+    def __str__(self):
         fmt = 'UnetUpBlock ({}) {} x {} -> {}'
         msg = fmt.format(self.name, self.bottom, self.horizontal, self.out)
         return msg
@@ -139,7 +139,6 @@ class Unet(nn.Module):
         hor_dims = down_dims[-2::-1]
         self.path_up = nn.ModuleList()
         for i, (d_bot, d_hor, d_out) in enumerate(zip(bot_dims, hor_dims, up)):
-
             block = UnetUpBlock(d_bot, d_hor, d_out, name='up_{}'.format(i))
             self.path_up.append(block)
 
@@ -147,7 +146,7 @@ class Unet(nn.Module):
         self.logit_conv = nn.Conv2d(self.up[-1], self.out_features, 1)
 
 
-    def __repr__(self):
+    def __str__(self):
         fmt = ('Unet:\n'
                'path_down: [\n'
                '\t{}\n'
@@ -157,8 +156,8 @@ class Unet(nn.Module):
                ']\n'
                'logits: {} -> {}'
               )
-        pd = '\n\t'.join(repr(l) for l in self.path_down)
-        pu = '\n\t'.join(repr(l) for l in self.path_up)
+        pd = '\n\t'.join(str(l) for l in self.path_down)
+        pu = '\n\t'.join(str(l) for l in self.path_up)
         msg = fmt.format(pd, pu, self.up[-1], self.out_features)
         return msg
 
@@ -174,6 +173,7 @@ class Unet(nn.Module):
                     raise RuntimeError(msg)
 
                 features_gated = F.avg_pool2d(features_gated, 2)
+
             features_gated, features = layer(features_gated)
             features_down.append(features)
         

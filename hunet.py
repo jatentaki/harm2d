@@ -97,45 +97,48 @@ class UnetUpBlock(nn.Module):
         return msg
 
 
-aunet_default_down = [
-    (1, ),
-    (8, 6, 6), # 20
-    (12, 4, 2), # 18
-    (8, 2, 2) # 12
+hunet_default_down = [
+    (8, 6, 6),
+    (12, 4, 2),
+    (8, 2, 2)
+]
+hunet_default_up= [
+    (12, 4, 2),
+    (20, )
 ]
 
 @localized_module
 class HUnet(nn.Module):
-    def __init__(self, down=aunet_default_down, up=None, classes=1):
+    def __init__(self, in_features=1, out_features=1, up=hunet_default_up,
+                 down=hunet_default_down):
         super(HUnet, self).__init__()
 
-        if up is None:
-            up = down[-2::-1]
+        if not len(down) == len(up) + 1:
+            raise ValueError("`down` must be 1 item longer than `up`")
 
-        self.classes = classes
-        self.down = down
+        if not (isinstance(up[-1], tuple) and len(up[-1]) == 1):
+            raise ValueError("last repr in `up` must be purely order 0")
+
         self.up = up
+        self.down = down
+        self.in_features = in_features
+        self.out_features = out_features
 
+        down_dims = [(in_features, )] + down
         self.path_down = nn.ModuleList()
-        for i, (d_in, d_out) in enumerate(zip(self.down[:-1], self.down[1:])):
+        for i, (d_in, d_out) in enumerate(zip(down_dims[:-1], down_dims[1:])):
             block = UnetDownBlock(d_in, d_out, name='down_{}'.format(i))
             self.path_down.append(block)
 
-        bottoms = [down[-1]] + self.up
-        horizontals = self.down[-2::-1]
-        outs = self.up
-
+        bot_dims = [down[-1]] + up
+        hor_dims = down_dims[-2::-1]
         self.path_up = nn.ModuleList()
-        for i, (d_bot, d_hor, d_out) in enumerate(zip(bottoms,
-                                                      horizontals,
-                                                      outs)):
-            block = UnetUpBlock(
-                d_bot, d_hor, d_out, name='up_{}'.format(i),
-            )
+        for i, (d_bot, d_hor, d_out) in enumerate(zip(bot_dims, hor_dims, up)):
+            block = UnetUpBlock(d_bot, d_hor, d_out, name='up_{}'.format(i))
             self.path_up.append(block)
 
-        self.logit_nonl = d2.ScalarGate2d(up[-2])
-        self.logit_conv = nn.Conv2d(sum(up[-2]), self.classes, 1)
+        self.logit_nonl = d2.ScalarGate2d(up[-1])
+        self.logit_conv = nn.Conv2d(sum(up[-1]), self.out_features, 1)
 
 
     def __repr__(self):
@@ -150,12 +153,17 @@ class HUnet(nn.Module):
               )
         pd = '\n\t'.join(repr(l) for l in self.path_down)
         pu = '\n\t'.join(repr(l) for l in self.path_up)
-        msg = fmt.format(pd, pu, self.up[-1], self.classes)
+        msg = fmt.format(pd, pu, self.up[-1], self.out_features)
         return msg
 
 
     @dimchecked
     def forward(self, inp: ['b', 'fi', 'hi', 'wi']) -> ['b', 'fo', 'ho', 'wo']:
+        if inp.size(1) != self.in_features:
+            fmt = "Expected {} feature channels in input, got {}"
+            msg = fmt.format(self.in_features, inp.size(1))
+            raise ValueError(msg)
+
         features_gated = harmonic.cmplx.from_real(inp)
         features_down = []
         for i, layer in enumerate(self.path_down):
@@ -178,7 +186,8 @@ class HUnet(nn.Module):
             f_b = layer(f_b, f_h)
 
         f_gated = self.logit_nonl(f_b)
-        return self.logit_conv(harmonic.cmplx.magnitude(f_gated))
+        f_real = f_gated[0, ...]
+        return self.logit_conv(f_real)
 
     def l2_params(self):
         return [p for n, p in self.named_parameters() if 'bias' not in n]
