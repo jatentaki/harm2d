@@ -70,37 +70,9 @@ class UnetDownBlock(nn.Module):
 
 
     def __repr__(self):
-        fmt = 'UnetDownBlock ({}) {} -> {}.'
+        fmt = 'UnetDownBlock ({}) {} -> {}'
         msg = fmt.format(self.name, self.in_, self.out_)
         return msg
-
-
-@localized_module
-class UnetMiddleBlock(nn.Module):
-    def __init__(self, in_out, mid, size=5, **kwargs):
-        super(UnetMiddleBlock, self).__init__()
-
-        self.in_out = in_out
-        self.mid = mid
-
-        self.conv1 = NormalizedConv2(in_out, mid, size=size, **kwargs)
-        self.nonl1 = AttentionGate(mid)
-
-        self.conv2 = NormalizedConv2(mid, in_out, size=size, **kwargs)
-        self.nonl2 = AttentionGate(in_out)
-
-    def __repr__(self):
-        fmt = 'UnetMiddleBlock ({}) {} -> {} -> {}.'
-        msg = fmt.format(self.name, self.in_out, self.mid, self.in_out)
-        return msg
-        
-    def forward(self, y):
-        y = self.conv1(y)
-        y = self.nonl1(y)
-        y = self.conv2(y)
-        y = self.nonl2(y)
-
-        return y
 
 
 @localized_module
@@ -138,7 +110,7 @@ class UnetUpBlock(nn.Module):
 
 
     def __repr__(self):
-        fmt = 'UnetUpBlock ({}) {} x {} -> {}.'
+        fmt = 'UnetUpBlock ({}) {} x {} -> {}'
         msg = fmt.format(self.name, self.bottom, self.horizontal, self.out)
         return msg
 
@@ -155,66 +127,71 @@ def repr_to_dims(repr):
 
 @localized_module
 class Unet(nn.Module):
-    def __init__(self, dimensions=unet_default_dimensions, **kwargs):
+    def __init__(self, dimensions=unet_default_dimensions, classes=1, **kwargs):
         super(Unet, self).__init__()
 
         self.dimensions = dimensions
+        self.classes = classes
 
         self.path_down = nn.ModuleList()
-        for i, (d_in, d_out) in enumerate(zip(self.dimensions[:-2],
-                                              self.dimensions[1:-1])):
+        for i, (d_in, d_out) in enumerate(zip(self.dimensions[:-1],
+                                              self.dimensions[1:])):
 
             block = UnetDownBlock(
                 d_in, d_out, name='down_{}'.format(i), **kwargs
             )
             self.path_down.append(block)
 
-        self.middle_block = UnetMiddleBlock(
-            self.dimensions[-2], self.dimensions[-1], name='middle', **kwargs
-        )
-
         self.path_up = nn.ModuleList()
-        for i, (d_in, d_out) in enumerate(zip(self.dimensions[-2::-1],
-                                              self.dimensions[-3::-1])):
+        for i, (d_bot, d_hor) in enumerate(zip(self.dimensions[::-1][:-2],
+                                               self.dimensions[::-1][1:-1])):
 
-            last_nonl = i != len(self.dimensions) - 3
             block = UnetUpBlock(
-                d_in, d_in, d_out, name='up_{}'.format(i), last_nonl=last_nonl, **kwargs,
+                d_bot, d_hor, d_hor, name='up_{}'.format(i), **kwargs,
             )
             self.path_up.append(block)
 
-        self.sequence = list(self.path_down) + [self.middle_block] + list(self.path_up)
+        self.logit_conv = nn.Conv2d(dimensions[1], self.classes, 1)
 
 
     def __repr__(self):
-        fmt = 'Unet, dimensions {}, path_down:' \
-        '[\n\t{}\n],\n\tmiddle: {}\npath_up:[\n\t{}\n]'
+        fmt = ('Unet:\n'
+               'path_down: [\n'
+               '\t{}\n'
+               ']\n'
+               'path_up: [\n'
+               '\t{}\n'
+               ']\n'
+               'logits: {} -> {}'
+              )
         pd = '\n\t'.join(repr(l) for l in self.path_down)
         pu = '\n\t'.join(repr(l) for l in self.path_up)
-        msg = fmt.format(self.dimensions, pd, repr(self.middle_block), pu)
+        msg = fmt.format(pd, pu, self.dimensions[1], self.classes)
         return msg
 
 
     def forward(self, inp):
         features = inp
         features_down = []
-        for layer in self.path_down:
+        for i, layer in enumerate(self.path_down):
+            if i != 0:
+                if not size_is_pow2(features):
+                    fmt = "Trying to downsample feature map of size {}"
+                    msg = fmt.format(features.size())
+                    raise RuntimeError(msg)
+
+                features = F.avg_pool2d(features, 2)
             features = layer(features)
             features_down.append(features)
+        
+        f_b = features_down[-1]
+        features_horizontal = features_down[-2::-1]
+        
+        for i, (layer, f_h) in enumerate(zip(self.path_up, features_horizontal)):
+            f_b = upsample(f_b, scale_factor=2)
+            f_b = layer(f_b, f_h)
 
-            if not size_is_pow2(features):
-                fmt = "Trying to downsample feature map of size {}"
-                msg = fmt.format(features.size())
-                raise RuntimeError(msg)
-            features = F.avg_pool2d(features, 2)
-            
-        features = self.middle_block(features)
-
-        for layer, features_left in zip(self.path_up, features_down[-1::-1]):
-            features = upsample(features, scale_factor=2)
-            features = layer(features, features_left)
-
-        return features
+        return self.logit_conv(f_b)
 
     def l2_params(self):
         return [p for n, p in self.named_parameters() if 'bias' not in n]
@@ -229,8 +206,8 @@ if __name__ == '__main__':
     class Tests(unittest.TestCase):
         def test_inequal_output_padding(self):
             unet = Unet()
-            input = torch.zeros(2, 1, 92, 92)
+            input = torch.zeros(2, 1, 104, 104)
             output = unet(input)
-            self.assertEqual(torch.Size([2, 1, 12, 12]), output.size())
+            self.assertEqual(torch.Size([2, 1, 24, 24]), output.size())
     
     unittest.main()
