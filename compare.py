@@ -64,12 +64,12 @@ def enumerate_logs():
             if parsed is not None:
                 setup, (train, test) = parsed
                 test += np.random.randn(*test.shape) * 0.00005
-                plt.plot(train, 'C{}--'.format(exp))
+                plt.plot(train, 'C{}x'.format(exp))
                 if rep == 1:
-                    label, = plt.plot(test, 'C{}-'.format(exp), label=setup)
+                    label, = plt.plot(test, 'C{}o'.format(exp), label=setup)
                     labels.append(label)
                 else:
-                    plt.plot(test, 'C{}-'.format(exp))
+                    plt.plot(test, 'C{}o'.format(exp))
     plt.legend(handles=labels)
 
 enumerate_logs()

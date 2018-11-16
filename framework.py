@@ -130,4 +130,4 @@ class Logger:
 
 
     def add_dict(self, dict_):
-        self.add_msg(print_dict(dict_))
+        self.add_msg(print_dict(dict_, prec=6))

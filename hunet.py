@@ -140,9 +140,12 @@ class HUnet(nn.Module):
         self.logit_nonl = d2.ScalarGate2d(up[-1])
         self.logit_conv = nn.Conv2d(sum(up[-1]), self.out_features, 1)
 
+        self.n_params = 0
+        for param in self.parameters():
+            self.n_params += param.numel()
 
     def __repr__(self):
-        fmt = ('HUnet:\n'
+        fmt = ('HUnet with {} degrees of freedom:\n'
                'path_down: [\n'
                '\t{}\n'
                ']\n'
@@ -153,7 +156,7 @@ class HUnet(nn.Module):
               )
         pd = '\n\t'.join(repr(l) for l in self.path_down)
         pu = '\n\t'.join(repr(l) for l in self.path_up)
-        msg = fmt.format(pd, pu, self.up[-1], self.out_features)
+        msg = fmt.format(self.n_params, pd, pu, self.up[-1], self.out_features)
         return msg
 
 

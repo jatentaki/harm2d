@@ -168,17 +168,15 @@ if __name__ == '__main__':
                 dimensions=dimensions, momentum=.1
             )
         elif args.model == 'harmonic':
-            network = HUnet(in_features=3)
+            down=[(2, 5, 2), (5, 7, 5), (10, 14, 10)] 
+            up=[(5, 7, 5), (9, )] 
+            network = HUnet(in_features=3, down=down, up=up)
 
         cuda = torch.cuda.is_available()
 
-        network_repr = repr(network)
-        logger.add_msg(network_repr)
+        network_repr = str(network)
         print(network_repr)
-        n_params = 0
-        for param in network.parameters():
-            n_params += param.numel()
-        print(n_params, 'learnable parameters')
+        logger.add_msg(network_repr)
 
         if cuda:
             network = network.cuda()
