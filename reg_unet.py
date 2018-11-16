@@ -64,9 +64,9 @@ class UnetDownBlock(nn.Module):
         y = self.conv1(y)
         y = self.nonl1(y)
         y = self.conv2(y)
-        y = self.nonl2(y)
+        y_gated = self.nonl2(y)
 
-        return y
+        return y_gated, y
 
 
     def __repr__(self):
@@ -78,33 +78,28 @@ class UnetDownBlock(nn.Module):
 @localized_module
 class UnetUpBlock(nn.Module):
     def __init__(self, bottom, horizontal, out,
-                 size=5, last_nonl=True, **kwargs):
+                 size=5, **kwargs):
         super(UnetUpBlock, self).__init__()
 
-        self.last_nonl = last_nonl
         self.bottom = bottom
         self.horizontal = horizontal
         self.cat = bottom + horizontal
         self.out = out
 
-        self.conv1 = NormalizedConv2(self.cat, self.cat, size, **kwargs)
         self.nonl1 = AttentionGate(self.cat)
+        self.conv1 = NormalizedConv2(self.cat, self.cat, size, **kwargs)
 
-        if self.last_nonl:
-            self.conv2 = NormalizedConv2(self.cat, self.out, size, **kwargs)
-            self.nonl2 = AttentionGate(self.out)
-        else:
-            self.conv2 = NormalizedConv2(self.cat, 1, size, **kwargs)
+        self.nonl2 = AttentionGate(self.cat)
+        self.conv2 = NormalizedConv2(self.cat, self.out, size, **kwargs)
 
 
     def forward(self, bottom, horizontal):
         horizontal = cut_to_match(bottom, horizontal)
         y = torch.cat([bottom, horizontal], dim=1)
-        y = self.conv1(y)
         y = self.nonl1(y)
+        y = self.conv1(y)
+        y = self.nonl2(y)
         y = self.conv2(y)
-        if self.last_nonl:
-            y = self.nonl2(y)
 
         return y
 
@@ -151,6 +146,7 @@ class Unet(nn.Module):
             )
             self.path_up.append(block)
 
+        self.logit_nonl = AttentionGate(dimensions[1])
         self.logit_conv = nn.Conv2d(dimensions[1], self.classes, 1)
 
 
@@ -171,17 +167,17 @@ class Unet(nn.Module):
 
 
     def forward(self, inp):
-        features = inp
+        features_gated = inp
         features_down = []
         for i, layer in enumerate(self.path_down):
             if i != 0:
-                if not size_is_pow2(features):
+                if not size_is_pow2(features_gated):
                     fmt = "Trying to downsample feature map of size {}"
                     msg = fmt.format(features.size())
                     raise RuntimeError(msg)
 
-                features = F.avg_pool2d(features, 2)
-            features = layer(features)
+                features_gated = F.avg_pool2d(features_gated, 2)
+            features_gated, features = layer(features_gated)
             features_down.append(features)
         
         f_b = features_down[-1]
@@ -191,7 +187,8 @@ class Unet(nn.Module):
             f_b = upsample(f_b, scale_factor=2)
             f_b = layer(f_b, f_h)
 
-        return self.logit_conv(f_b)
+        f_gated = self.logit_nonl(f_b)
+        return self.logit_conv(f_gated)
 
     def l2_params(self):
         return [p for n, p in self.named_parameters() if 'bias' not in n]
