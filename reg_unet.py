@@ -77,8 +77,7 @@ class UnetDownBlock(nn.Module):
 
 @localized_module
 class UnetUpBlock(nn.Module):
-    def __init__(self, bottom, horizontal, out,
-                 size=5, **kwargs):
+    def __init__(self, bottom, horizontal, out, size=5, **kwargs):
         super(UnetUpBlock, self).__init__()
 
         self.bottom = bottom
@@ -132,9 +131,7 @@ class Unet(nn.Module):
         for i, (d_in, d_out) in enumerate(zip(self.dimensions[:-1],
                                               self.dimensions[1:])):
 
-            block = UnetDownBlock(
-                d_in, d_out, name='down_{}'.format(i), **kwargs
-            )
+            block = UnetDownBlock(d_in, d_out, name='down_{}'.format(i), **kwargs)
             self.path_down.append(block)
 
         self.path_up = nn.ModuleList()
@@ -173,7 +170,7 @@ class Unet(nn.Module):
             if i != 0:
                 if not size_is_pow2(features_gated):
                     fmt = "Trying to downsample feature map of size {}"
-                    msg = fmt.format(features.size())
+                    msg = fmt.format(features_gated.size())
                     raise RuntimeError(msg)
 
                 features_gated = F.avg_pool2d(features_gated, 2)
@@ -183,7 +180,7 @@ class Unet(nn.Module):
         f_b = features_down[-1]
         features_horizontal = features_down[-2::-1]
         
-        for i, (layer, f_h) in enumerate(zip(self.path_up, features_horizontal)):
+        for layer, f_h in zip(self.path_up, features_horizontal):
             f_b = upsample(f_b, scale_factor=2)
             f_b = layer(f_b, f_h)
 

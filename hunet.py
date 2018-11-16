@@ -27,72 +27,36 @@ class BNConv2d(nn.Module):
 
 @localized_module
 class UnetDownBlock(nn.Module):
-    def __init__(self, in_repr, out_repr, size=5, first_nonl=True):
+    def __init__(self, in_repr, out_repr, size=5):
         super(UnetDownBlock, self).__init__()
-
-        self.first_nonl = first_nonl
 
         self.in_repr = in_repr
         self.out_repr = out_repr
         
-        if first_nonl:
-            self.nonl1 = d2.ScalarGate2d(in_repr)
-            self.conv1 = BNConv2d(in_repr, out_repr, size)
-        else:
-            self.conv1 = d2.HConv2d(in_repr, out_repr, size)
+        self.conv1 = BNConv2d(in_repr, out_repr, size)
+        self.nonl1 = d2.ScalarGate2d(out_repr)
 
-        self.nonl2 = d2.ScalarGate2d(out_repr)
         self.conv2 = BNConv2d(out_repr, out_repr, size)
+        self.nonl2 = d2.ScalarGate2d(out_repr)
     
 
     @dimchecked
-    def forward(self, y: [2, 'b', 'fi', 'hi', 'wi']
-               )      -> [2, 'b', 'fo', 'ho', 'wo']:
-        if self.first_nonl:
-            y = self.nonl1(y)
-        y = self.conv1(y)
-        y = self.nonl2(y)
-        y = self.conv2(y)
+    def forward(self, x: [2, 'b', 'fi', 'hi', 'wi']
+               )     -> ([2, 'b', 'fo', 'ho', 'wo'],
+                         [2, 'b', 'fo', 'ho', 'wo']):
 
-        return y
+        y = self.conv1(x)
+        y = self.nonl1(y)
+        y = self.conv2(y)
+        y_gated = self.nonl2(y)
+
+        return y_gated, y
 
 
     def __repr__(self):
         fmt = 'UnetDownBlock ({}) {} -> {}.'
         msg = fmt.format(self.name, self.in_repr, self.out_repr)
         return msg
-
-
-@localized_module
-class UnetMiddleBlock(nn.Module):
-    def __init__(self, in_repr, mid_repr, out_repr, size=5):
-        super(UnetMiddleBlock, self).__init__()
-
-        self.in_repr = in_repr
-        self.mid_repr = mid_repr
-        self.out_repr = out_repr
-
-        self.nonl1 = d2.ScalarGate2d(in_repr)
-        self.conv1 = BNConv2d(in_repr, mid_repr, size=size)
-
-        self.nonl2 = d2.ScalarGate2d(mid_repr)
-        self.conv2 = BNConv2d(mid_repr, out_repr, size=size)
-
-    def __repr__(self):
-        fmt = 'UnetMiddleBlock ({}) {} -> {} -> {}.'
-        msg = fmt.format(self.name, self.in_repr, self.mid_repr, self.out_repr)
-        return msg
-        
-    @dimchecked
-    def forward(self, y: [2, 'b', 'fi', 'hi', 'wi']
-               )      -> [2, 'b', 'fo', 'ho', 'wo']:
-
-        y = self.nonl1(y)
-        y = self.conv1(y)
-        y = self.nonl2(y)
-        y = self.conv2(y)
-
-        return y
 
 
 @localized_module
@@ -128,93 +92,93 @@ class UnetUpBlock(nn.Module):
 
 
     def __repr__(self):
-        fmt = 'UnetUpBlock ({}) {} x {} -> {}.'
+        fmt = 'UnetUpBlock ({}) bot {} x hor {} -> {}.'
         msg = fmt.format(self.name, self.bottom_repr, self.horizontal_repr, self.out_repr)
         return msg
 
 
 aunet_default_down = [
     (1, ),
-    (8, 6, 6),
-    (12, 4, 2),
-    (8, 2, 2)
+    (8, 6, 6), # 20
+    (12, 4, 2), # 18
+    (8, 2, 2) # 12
 ]
 
 @localized_module
 class HUnet(nn.Module):
-    def __init__(self, down=aunet_default_down,
-                 mid=None, up=None):
+    def __init__(self, down=aunet_default_down, up=None, classes=1):
         super(HUnet, self).__init__()
 
-        if (mid is None) != (up is None):
-            raise ValueError("You must either specify both `mid` and `up` or none of them")
-
-        if mid is None and up is None:
-            mid = down[-1]
+        if up is None:
             up = down[-2::-1]
-            down = down[:-1]
 
+        self.classes = classes
         self.down = down
-        self.mid = mid
         self.up = up
 
         self.path_down = nn.ModuleList()
-        for i, (d_in, d_out) in enumerate(zip(self.down[:-1],
-                                              self.down[1:])):
-
-            # do not pass the very input of SE3Unet through nonlinearity
-            first_nonl = i != 0
-
-            block = UnetDownBlock(
-                d_in, d_out, name='down_{}'.format(i), first_nonl=first_nonl,
-            )
+        for i, (d_in, d_out) in enumerate(zip(self.down[:-1], self.down[1:])):
+            block = UnetDownBlock(d_in, d_out, name='down_{}'.format(i))
             self.path_down.append(block)
 
-        self.middle_block = UnetMiddleBlock(
-            self.down[-1], self.mid, self.up[0], name='middle'
-        )
+        bottoms = [down[-1]] + self.up
+        horizontals = self.down[-2::-1]
+        outs = self.up
 
         self.path_up = nn.ModuleList()
-        for i, (d_bot, d_hor, d_out) in enumerate(zip(self.up,
-                                                      self.down[::-1],
-                                                      self.up[1:])):
-
+        for i, (d_bot, d_hor, d_out) in enumerate(zip(bottoms,
+                                                      horizontals,
+                                                      outs)):
             block = UnetUpBlock(
                 d_bot, d_hor, d_out, name='up_{}'.format(i),
             )
             self.path_up.append(block)
 
+        self.logit_nonl = d2.ScalarGate2d(up[-2])
+        self.logit_conv = nn.Conv2d(sum(up[-2]), self.classes, 1)
+
 
     def __repr__(self):
-        fmt = 'HUnet, layout {},\npath_down:' \
-        '[\n\t{}\n],\nmiddle:\t{}\npath_up:[\n\t{}\n]'
+        fmt = ('HUnet:\n'
+               'path_down: [\n'
+               '\t{}\n'
+               ']\n'
+               'path_up: [\n'
+               '\t{}\n'
+               ']\n'
+               'logits: {} -> {}'
+              )
         pd = '\n\t'.join(repr(l) for l in self.path_down)
         pu = '\n\t'.join(repr(l) for l in self.path_up)
-        msg = fmt.format(self.down + [self.mid] + self.up, pd, repr(self.middle_block), pu)
+        msg = fmt.format(pd, pu, self.up[-1], self.classes)
         return msg
 
 
     @dimchecked
     def forward(self, inp: ['b', 'fi', 'hi', 'wi']) -> ['b', 'fo', 'ho', 'wo']:
-        features = harmonic.cmplx.from_real(inp)
+        features_gated = harmonic.cmplx.from_real(inp)
         features_down = []
-        for layer in self.path_down:
-            features = layer(features)
+        for i, layer in enumerate(self.path_down):
+            if i != 0:
+                if not size_is_pow2(features_gated):
+                    fmt = "Trying to downsample feature map of size {}"
+                    msg = fmt.format(features_gated.size())
+                    raise RuntimeError(msg)
+
+                features_gated = d2.avg_pool2d(features_gated, 2)
+
+            features_gated, features  = layer(features_gated)
             features_down.append(features)
 
-            if not size_is_pow2(features):
-                fmt = "Trying to downsample feature map of size {}"
-                msg = fmt.format(features.size())
-                raise RuntimeError(msg)
-            features = d2.avg_pool2d(features, 2)
-            
-        features = self.middle_block(features)
+        f_b = features_down[-1]
+        features_horizontal = features_down[-2::-1]
 
-        for layer, features_horizontal in zip(self.path_up, features_down[-1::-1]):
-            features = d2.upsample_2d(features, scale_factor=2)
-            features = layer(features, features_horizontal)
+        for layer, f_h in zip(self.path_up, features_horizontal):
+            f_b = d2.upsample_2d(f_b, scale_factor=2)
+            f_b = layer(f_b, f_h)
 
-        return features[0, ...]
+        f_gated = self.logit_nonl(f_b)
+        return self.logit_conv(harmonic.cmplx.magnitude(f_gated))
 
     def l2_params(self):
         return [p for n, p in self.named_parameters() if 'bias' not in n]
