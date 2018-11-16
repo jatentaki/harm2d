@@ -40,6 +40,8 @@ def train(network, dataset, loss_fn, optimizer, epoch, early_stop=None, logger=N
             if logger is not None:
                 logger.add_dict({'loss': loss_meter.last})
 
+    return loss_meter.avg
+
 
 def test(network, dataset, criteria, early_stop=None, logger=None, callbacks=[]):
     if criteria == []:
@@ -116,7 +118,7 @@ class Logger:
                 break
             
         self.path = proposed_name
-        self.file = open_file(self.path, 'w')
+        self.file = open_file(self.path, 'w', buffering=512)
         print('Logging to', self.path)
 
 

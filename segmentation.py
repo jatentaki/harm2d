@@ -168,8 +168,8 @@ if __name__ == '__main__':
                 dimensions=dimensions, momentum=.1
             )
         elif args.model == 'harmonic':
-            down=[(2, 5, 2), (5, 7, 5), (10, 14, 10)] 
-            up=[(5, 7, 5), (9, )] 
+            down=[(10, 7, 7), (7, 7, 7), (5, 5, 5)] 
+            up=[(7, 7, 7), (10, )] 
             network = HUnet(in_features=3, down=down, up=up)
 
         cuda = torch.cuda.is_available()
@@ -226,7 +226,7 @@ if __name__ == '__main__':
             )
 
             for epoch in range(start_epoch, args.epochs):
-                train(
+                train_loss = train(
                     network, train_loader, loss_fn, optim, epoch,
                     early_stop=args.early_stop, logger=logger
                 )
@@ -235,7 +235,7 @@ if __name__ == '__main__':
                     network, val_loader, criteria,
                     early_stop=args.early_stop, logger=logger
                 )
-                scheduler.step(score)
+                scheduler.step(train_loss)
                 save_checkpoint(epoch, score, network, optim, path=args.artifacts)
 
                 if score > best_score:
