@@ -1,15 +1,15 @@
 import time, functools, torch, os
 import numpy as np
 
-def upsample(inp, scale_factor=2, mode='trilinear', align_corners=False):
-    if not inp.dim() == 5:
+def upsample(inp, scale_factor=2, mode='bilinear', align_corners=False):
+    if not inp.dim() == 4:
         fmt = 'Attempting to upscale a tensor of shape {}'
         msg = fmt.format(inp.size())
         raise ValueError(msg)
 
     return torch.nn.functional.interpolate(
         inp, scale_factor=scale_factor,
-        mode='trilinear', align_corners=False
+        mode='bilinear', align_corners=False
     )
 
 def time_it(return_tuple=False):

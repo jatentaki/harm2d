@@ -1,12 +1,27 @@
-import torch, os, imageio, re
+import torch, os, imageio, re, random
 import torchvision as tv
 import torchvision.transforms as T
 from PIL import Image
 
+class RandomRotate:
+    def __call__(self, *imgs):
+        angle = random.randint(-180, 180)
+
+        rotated = []
+        for img in imgs:
+            if img.mode == 'L':
+                rotated.append(img.rotate(angle, resample=Image.NEAREST))
+            elif img.mode == 'RGB':
+                rotated.append(img.rotate(angle, resample=Image.BICUBIC))
+            else:
+                raise ValueError("Encountered unsupported mode `{}`".format(img.mode))
+
+        return rotated
+
 class DriveDataset:
     def __init__(self, path, training=True, img_transform=T.ToTensor(),
                  mask_transform=T.ToTensor(), label_transform=T.ToTensor(),
-                 bloat=1):
+                 global_transform=None, bloat=1):
         self.training = training
 
         self.subdir = 'training' if training else 'test'
@@ -14,6 +29,7 @@ class DriveDataset:
         self.img_p = path + os.path.sep + self.subdir + os.path.sep + 'images'
         self.mask_p = path + os.path.sep + self.subdir + os.path.sep + 'mask'
 
+        self.global_transform = global_transform
         self.img_transform = img_transform
         self.mask_transform = mask_transform
         self.label_transform = label_transform
@@ -57,6 +73,9 @@ class DriveDataset:
     def __getitem__(self, idx):
         img, mask, label = self.samples[idx]
 
+        if self.global_transform:
+            img, mask, label = self.global_transform(img, mask, label)
+
         if self.img_transform:
             img = self.img_transform(img)
 
@@ -67,7 +86,3 @@ class DriveDataset:
             label = self.label_transform(label)
 
         return img, mask, label 
-
-if __name__ == '__main__':
-    d = DriveDataset('dataset', training=False)
-    print(d[5])

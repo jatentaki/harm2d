@@ -9,8 +9,8 @@ from tqdm import tqdm
 import loader, losses
 
 from utils import size_adaptive_, maybe_make_dir, print_dict
+from criteria import PrecRec
 from framework import train, test, Logger
-from criteria import Tableau4, Histogrammer
 from reg_unet import Unet
 from hunet import HUnet
 
@@ -132,10 +132,15 @@ if __name__ == '__main__':
         warnings.simplefilter("ignore")
         logger.add_msg('Ignoring warnings')
 
+        if args.model == 'harmonic':
+            train_global_transform = loader.RandomRotate()
+        else:
+            train_global_transform = None
+
         train_data = loader.DriveDataset(
             args.data_path, training=True, img_transform=transform,
             mask_transform=transform, label_transform=transform,
-            bloat=args.bloat
+            global_transform = train_global_transform, bloat=args.bloat
         )
         train_loader = DataLoader(
             train_data, batch_size=args.batch_size, shuffle=True, num_workers=args.workers
@@ -217,9 +222,10 @@ if __name__ == '__main__':
                 criteria=criteria, early_stop=args.early_stop
             )
         elif args.action == 'evaluate':
-            callbacks = [criteria.PrecRec()]
-            test(network, val_loader, criteria, logger=logger, callbacks=callbacks)
-            print('Best f1', callbacks[0].best_f1())
+            prec_rec = PrecRec()
+            test(network, val_loader, criteria, logger=logger, callbacks=[prec_rec])
+            f1, thres = prec_rec.best_f1()
+            print('F1', f1, 'at', thres)
 
         elif args.action == 'train':
             scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(

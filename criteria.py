@@ -34,12 +34,16 @@ class PrecRec(Criterion):
         self.thresholds = torch.linspace(0, 1, n_thresholds + 2)[1:-1]
         self.classes = torch.zeros(4, n_thresholds, dtype=torch.int64)
 
+    @utils.size_adaptive
     def __call__(self, prediction, mask, target):
+        sigmoids = torch.sigmoid(prediction).cpu()
+        mask = mask.to(torch.uint8).cpu()
+        target = target[mask].to(torch.uint8).cpu()
+
         for i, threshold in enumerate(self.thresholds):
-            positive = torch.sigmoid(prediction) > threshold
+            positive = sigmoids > threshold
 
             positive = positive[mask]
-            target = target[mask]
 
             tp = positive & target
             fp = positive & ~target
@@ -66,13 +70,13 @@ class PrecRec(Criterion):
         return self.classes[3]
 
     def prec_rec(self):
-        prec = self.tp() / (self.tp() + self.fp())
-        rec = self.tp() / (self.tp() + self.fn())
+        prec = self.tp().float() / (self.tp().float() + self.fp().float())
+        rec = self.tp().float() / (self.tp().float() + self.fn().float())
 
         return prec, rec
 
     def best_f1(self):
         prec, rec = self.prec_rec()
         f1 = 2 * prec * rec / (prec + rec)
-
-        return f1.max().item()
+        argmax = f1.argmax().item()
+        return f1[argmax].item(), self.thresholds[argmax].item()
