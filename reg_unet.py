@@ -122,7 +122,9 @@ class Unet(nn.Module):
         super(Unet, self).__init__()
 
         if not len(down) == len(up) + 1:
-            raise ValueError("wrong specification")
+            fmt = "Wrong specification, len(down) == {}, len(up) == {}"
+            msg = fmt.format(len(down), len(up))
+            raise ValueError(msg)
 
         self.up = up
         self.down = down

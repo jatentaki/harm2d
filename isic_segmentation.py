@@ -1,4 +1,4 @@
-import torch, argparse, functools, itertools, os, warnings, imageio
+import torch, argparse, functools, itertools, os, warnings
 import torch.nn.functional as F
 import torchvision as tv
 import numpy as np
@@ -6,10 +6,9 @@ import numpy as np
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
-import loader, losses
+import isic_loader, losses
 
 from utils import size_adaptive_, maybe_make_dir, print_dict
-from criteria import PrecRec
 from framework import train, test, Logger
 from reg_unet import Unet
 from hunet import HUnet
@@ -105,8 +104,6 @@ if __name__ == '__main__':
     parser.add_argument('--restart-checkpoint', action='store_true',
                         help='consider a loaded checkpoint to be epoch 0 with 0' + \
                         'best performance')
-    parser.add_argument('-i', '--iteration', default=0, type=int,
-                        help='variable for automatic parameter sweeps')
 
     args = parser.parse_args()
     
@@ -124,38 +121,37 @@ if __name__ == '__main__':
 
         logger.add_dict(vars(args))
 
-        transform = tv.transforms.Compose([
-            tv.transforms.CenterCrop(564),
-            tv.transforms.ToTensor()
-        ])
-
         warnings.simplefilter("ignore")
         logger.add_msg('Ignoring warnings')
 
-        if args.model == 'harmonic':
-            train_global_transform = loader.RandomRotate()
-        else:
-            train_global_transform = None
+        resize = isic_loader.ResizeTransform((1024, 768))
 
-        train_data = loader.DriveDataset(
-            args.data_path, training=True, img_transform=transform,
-            mask_transform=transform, label_transform=transform,
-            global_transform = train_global_transform, bloat=args.bloat
+        train_transform = isic_loader.Compose([
+            resize,
+            isic_loader.Lift(tv.transforms.ToTensor()),
+            isic_loader.RandomCropTransform((564, 564))
+        ])
+
+        test_transform = isic_loader.Compose([
+            resize,
+            isic_loader.Lift(tv.transforms.ToTensor()),
+            isic_loader.Lift(tv.transforms.CenterCrop(564))
+        ])
+
+        train_data = isic_loader.ISICDataset(
+            args.data_path, global_transform=train_transform
         )
         train_loader = DataLoader(
             train_data, batch_size=args.batch_size, shuffle=True, num_workers=args.workers
         )
 
         if args.test_on_train:
-            val_data = loader.DriveDataset(
-                args.data_path, training=True, img_transform=transform,
-                mask_transform=transform, label_transform=transform,
-                bloat=1
+            val_data = isic_loader.ISICDataset(
+                args.data_path, global_transform=test_transform
             )
         else:
-            val_data = loader.DriveDataset(
-                args.data_path, training=False, img_transform=transform,
-                mask_transform=transform, label_transform=transform
+            val_data = isic_loader.ISICDataset(
+                args.data_path, global_transform=test_transform
             )
 
         val_loader = DataLoader(
@@ -163,26 +159,30 @@ if __name__ == '__main__':
         )
 
         if args.model == 'baseline':
-            down = [2 * (10 + 7 + 7), 2 * 3 * 7, 2 * 3 * 5]
-            up = [2 * 3 * 7, 20]
+            down = [16, 32, 64]
+            up = [32, 16]
             network = Unet(
                 up=up, down=down, in_features=3
             )
         elif args.model == 'harmonic':
-            down=[(10, 7, 7), (7, 7, 7), (5, 5, 5)] 
-            up=[(7, 7, 7), (10, )] 
+            down = [(2, 5, 2), (5, 7, 5), (5, 7, 5)]
+            up = [(5, 7, 5), (9,)]
             network = HUnet(in_features=3, down=down, up=up)
 
         cuda = torch.cuda.is_available()
 
-        network_repr = str(network)
-        print(network_repr)
+        network_repr = repr(network)
         logger.add_msg(network_repr)
+        print(network_repr)
+        n_params = 0
+        for param in network.parameters():
+            n_params += param.numel()
+        print(n_params, 'learnable parameters')
 
         if cuda:
             network = network.cuda()
 
-        loss_fn = size_adaptive_(losses.BCE)()
+        loss_fn = size_adaptive_(losses.BCE)(masked=False)
         loss_fn.name = 'BCE'
 
         optim = torch.optim.Adam([
@@ -192,9 +192,9 @@ if __name__ == '__main__':
 
         criteria = [loss_fn]
 
-#        if args.model == 'baseline':
-#            example = next(iter(train_loader))[0].cuda()
-#            network = torch.jit.trace(network, example)
+        if args.model == 'baseline':
+            example = next(iter(train_loader))[0].cuda()
+            network = torch.jit.trace(network, example)
 
         if args.load:
             start_epoch, best_score, model_dict, optim_dict = load_checkpoint(args.load)
@@ -216,10 +216,7 @@ if __name__ == '__main__':
                 criteria=criteria, early_stop=args.early_stop
             )
         elif args.action == 'evaluate':
-            prec_rec = PrecRec()
-            test(network, val_loader, criteria, logger=logger, callbacks=[prec_rec])
-            f1, thres = prec_rec.best_f1()
-            print('F1', f1, 'at', thres)
+            test(network, val_loader, criteria, logger=logger, callbacks=[]) 
 
         elif args.action == 'train':
             scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
@@ -227,7 +224,7 @@ if __name__ == '__main__':
             )
 
             for epoch in range(start_epoch, args.epochs):
-                train_loss = train(
+                train(
                     network, train_loader, loss_fn, optim, epoch,
                     early_stop=args.early_stop, logger=logger
                 )
@@ -236,7 +233,7 @@ if __name__ == '__main__':
                     network, val_loader, criteria,
                     early_stop=args.early_stop, logger=logger
                 )
-                scheduler.step(train_loss)
+                scheduler.step(score)
                 save_checkpoint(epoch, score, network, optim, path=args.artifacts)
 
                 if score > best_score:

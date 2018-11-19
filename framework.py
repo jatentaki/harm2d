@@ -4,15 +4,13 @@ import criteria
 from tqdm import tqdm
 
 def train(network, dataset, loss_fn, optimizer, epoch, early_stop=None, logger=None):
-    def optimization_step(input, mask, target):
+    def optimization_step(*args):
         if torch.cuda.is_available():
-            input = input.cuda()
-            target = target.cuda()
-            mask = mask.cuda()
+            args = [a.cuda() for a in args]
 
-        prediction = network(input)
+        prediction = network(args[0])
         optimizer.zero_grad()
-        loss = loss_fn(prediction, mask, target)
+        loss = loss_fn(prediction, *args[1:])
         loss.backward()
         optimizer.step()
 
@@ -26,11 +24,11 @@ def train(network, dataset, loss_fn, optimizer, epoch, early_stop=None, logger=N
         logger.add_msg(msg)
 
     with tqdm(total=len(dataset), dynamic_ncols=True) as progress:
-        for i, (img, mask, target) in enumerate(dataset):
+        for i, args in enumerate(dataset):
             if i == early_stop:
                 return
 
-            loss = optimization_step(img, mask, target)
+            loss = optimization_step(*args)
 
             loss_meter.update(loss.item())
 
@@ -54,22 +52,20 @@ def test(network, dataset, criteria, early_stop=None, logger=None, callbacks=[])
         logger.add_msg('Validation')
 
     with tqdm(total=len(dataset), dynamic_ncols=True) as progress, torch.no_grad():
-        for i, (input, mask, target) in enumerate(dataset):
+        for i, args in enumerate(dataset):
             if i == early_stop:
                 break
 
             if torch.cuda.is_available():
-                input = input.cuda()
-                target = target.cuda()
-                mask = mask.cuda()
+                args = [a.cuda() for a in args]
 
-            prediction = network(input)
+            prediction = network(args[0])
 
             for callback in callbacks:
-                callback(prediction, mask, target)
+                callback(prediction, *args[1:])
 
             for criterion, meter in zip(criteria, meters):
-                perf = criterion(prediction, mask, target)
+                perf = criterion(prediction, *args[1:])
                 if isinstance(perf, torch.Tensor):
                     meter.update(perf.item())
                 else:

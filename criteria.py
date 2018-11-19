@@ -8,26 +8,6 @@ class Criterion(nn.Module):
         super(Criterion, self).__init__()
         self.name = name if name is not None else type(self).__name__
 
-class Tableau4(Criterion):
-    def __init__(self, name='TP FP TN FN', threshold=0.5):
-        super(Tableau4, self).__init__()
-        self.name = name
-        self.threshold = threshold
-
-    def forward(self, x, target, _img):
-        positive = (torch.sigmoid(x) > self.threshold)
-        target, mask = mateusz_to_target_and_mask(target)
-
-        positive = positive[mask]
-        target = target[mask]
-
-        tp = positive & target
-        fp = positive & ~target
-        tn = ~positive & ~target
-        fn = ~positive & target
-
-        return np.array([i.sum().item() for i in [tp, fp, tn, fn]])
-
 class PrecRec(Criterion):
     def __init__(self, n_thresholds=10):
         self.n_thresholds = n_thresholds
@@ -37,13 +17,13 @@ class PrecRec(Criterion):
     @utils.size_adaptive
     def __call__(self, prediction, mask, target):
         sigmoids = torch.sigmoid(prediction).cpu()
-        mask = mask.to(torch.uint8).cpu()
-        target = target[mask].to(torch.uint8).cpu()
+        if mask is not None:
+            mask = mask.to(torch.uint8).cpu()
+            target = target[mask].to(torch.uint8).cpu()
+            sigmoids = sigmoids[mask]
 
         for i, threshold in enumerate(self.thresholds):
             positive = sigmoids > threshold
-
-            positive = positive[mask]
 
             tp = positive & target
             fp = positive & ~target
