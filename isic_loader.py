@@ -46,6 +46,28 @@ class RandomCropTransform:
         
         return [img[:, sw:sw+self.w, sh:sh+self.h] for img in imgs]
 
+class CenterCropTransform(Lift):
+    def __init__(self, target_size):
+        self.w, self.h = target_size
+
+        def crop(img):
+            w, h = img.shape[1:3]
+            assert w >= self.w and h >= self.h
+            
+            dw = w - self.w
+            dh = h - self.h
+
+            if dw >= 0:
+                half_w = int(dw / 2)
+                img = img[:, half_w:half_w+self.w, :]
+            
+            if dh >= 0:
+                half_h = int(dh / 2)
+                img = img[:, :, half_h:half_h+self.h]
+
+            return img
+
+        super(CenterCropTransform, self).__init__(crop)
 
 
 class ISICDataset:

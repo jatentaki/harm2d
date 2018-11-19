@@ -9,8 +9,9 @@ from tqdm import tqdm
 import isic_loader, losses
 
 from utils import size_adaptive_, maybe_make_dir, print_dict
+from criteria import PrecRec
 from framework import train, test, Logger
-from reg_unet import Unet
+from reg_unet import Unet, repr_to_n
 from hunet import HUnet
 
 def load_checkpoint(path):
@@ -53,25 +54,30 @@ def inspect(network, loader, path, early_stop=None, criteria=[]):
     maybe_make_dir(path)
 
     with tqdm(total=len(loader), dynamic_ncols=True) as progress, torch.no_grad():
-        for i, (input, mask, target) in enumerate(loader):
+        for i, args in enumerate(loader):
             if i == early_stop:
                 break
 
             if torch.cuda.is_available():
-                input = input.cuda()
+                input = args[0].cuda()
 
+            directory = path + os.path.sep + str(i)
+
+            # prediction
             prediction = network(input)
-
-#            if criteria:
-#                scores = {c.name: c(prediction, target, input) for c in criteria}
-#                eval_name = path + 'eval{}.txt'.format(i)
-#                with open(eval_name, 'w') as f:
-#                    f.write(fname[0] + ' ' + print_dict(scores))
-
-            pred_name = path + 'pred{}.npy'.format(i)
             heatmap = torch.sigmoid(prediction)
             heatmap = heatmap.cpu()[0, 0].numpy()
-            np.save(pred_name, heatmap)
+            hm_path = directory + os.path.sep + 'heatmap.npy'
+            maybe_make_dir(hm_path, silent=True)
+            np.save(hm_path, heatmap)
+
+            # image 
+            image = input.cpu()[0].numpy().transpose(1, 2, 0)
+            np.save(directory + os.path.sep + 'image.npy', image)
+
+            # ground truth 
+            g_truth = args[-1][0, 0].numpy()
+            np.save(directory + os.path.sep + 'g_truth.npy', g_truth)
 
             progress.update(1)
 
@@ -135,11 +141,11 @@ if __name__ == '__main__':
         test_transform = isic_loader.Compose([
             resize,
             isic_loader.Lift(tv.transforms.ToTensor()),
-            isic_loader.Lift(tv.transforms.CenterCrop(564))
+            isic_loader.CenterCropTransform((564, 564))
         ])
 
         train_data = isic_loader.ISICDataset(
-            args.data_path, global_transform=train_transform
+            args.data_path + '/train', global_transform=train_transform
         )
         train_loader = DataLoader(
             train_data, batch_size=args.batch_size, shuffle=True, num_workers=args.workers
@@ -147,26 +153,26 @@ if __name__ == '__main__':
 
         if args.test_on_train:
             val_data = isic_loader.ISICDataset(
-                args.data_path, global_transform=test_transform
+                args.data_path + '/train', global_transform=test_transform
             )
         else:
             val_data = isic_loader.ISICDataset(
-                args.data_path, global_transform=test_transform
+                args.data_path + '/test', global_transform=test_transform
             )
 
         val_loader = DataLoader(
             val_data, batch_size=args.batch_size, shuffle=False, num_workers=args.workers
         )
 
+        down = [(2, 5, 2), (5, 7, 5), (5, 7, 5)]
+        up = [(5, 7, 5), (9,)]
         if args.model == 'baseline':
-            down = [16, 32, 64]
-            up = [32, 16]
+            down = [repr_to_n(d) for d in down]
+            up = [repr_to_n(u) for u in up]
             network = Unet(
                 up=up, down=down, in_features=3
             )
         elif args.model == 'harmonic':
-            down = [(2, 5, 2), (5, 7, 5), (5, 7, 5)]
-            up = [(5, 7, 5), (9,)]
             network = HUnet(in_features=3, down=down, up=up)
 
         cuda = torch.cuda.is_available()
@@ -192,9 +198,9 @@ if __name__ == '__main__':
 
         criteria = [loss_fn]
 
-        if args.model == 'baseline':
-            example = next(iter(train_loader))[0].cuda()
-            network = torch.jit.trace(network, example)
+#        if args.model == 'baseline':
+        example = next(iter(train_loader))[0].cuda()
+        network = torch.jit.trace(network, example)
 
         if args.load:
             start_epoch, best_score, model_dict, optim_dict = load_checkpoint(args.load)
@@ -216,7 +222,10 @@ if __name__ == '__main__':
                 criteria=criteria, early_stop=args.early_stop
             )
         elif args.action == 'evaluate':
-            test(network, val_loader, criteria, logger=logger, callbacks=[]) 
+            prec_rec = PrecRec(masked=False)
+            test(network, val_loader, criteria, logger=logger, callbacks=[prec_rec])
+            f1, thres = prec_rec.best_f1()
+            print('F1', f1, 'at', thres)
 
         elif args.action == 'train':
             scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(

@@ -1,2 +1,4 @@
 #! /usr/bin/env python
-python ~/harm2d/isic_segmentation.py /cvlabdata2/cvlab/datasets_tyszkiewicz/isic2018 isic_artifacts_hnet harmonic train -j 1 -b 4 --epochs 2
+#python ~/harm2d/isic_segmentation.py /cvlabdata2/cvlab/datasets_tyszkiewicz/isic2018 isic_artifacts_harmonic harmonic train -j 6 -b 4 --epochs 10
+#python ~/harm2d/isic_segmentation.py /cvlabdata2/cvlab/datasets_tyszkiewicz/isic2018 isic_artifacts_baseline baseline train -j 6 -b 4 --epochs 10
+python ~/harm2d/isic_segmentation.py /cvlabdata2/cvlab/datasets_tyszkiewicz/isic2018 isic_artifacts_harmonic/insp harmonic inspect -j 6 -b 4 --load isic_artifacts_harmonic/epoch9.pth.tar

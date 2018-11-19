@@ -69,12 +69,6 @@ class UnetDownBlock(nn.Module):
         return y_gated, y
 
 
-    def __str__(self):
-        fmt = 'UnetDownBlock ({}) {} -> {}'
-        msg = fmt.format(self.name, self.in_, self.out_)
-        return msg
-
-
 @localized_module
 class UnetUpBlock(nn.Module):
     def __init__(self, bottom, horizontal, out, size=5, **kwargs):
@@ -103,16 +97,11 @@ class UnetUpBlock(nn.Module):
         return y
 
 
-    def __str__(self):
-        fmt = 'UnetUpBlock ({}) {} x {} -> {}'
-        msg = fmt.format(self.name, self.bottom, self.horizontal, self.out)
-        return msg
-
 unet_default_down = [16, 32, 64]
 unet_default_up = [32, 16]
 
-def repr_to_dims(repr):
-    return sum(n * (2 * j + 1) for j, n in enumerate(repr))
+def repr_to_n(repr):
+    return 2 * sum(repr)
 
 
 @localized_module
@@ -146,22 +135,6 @@ class Unet(nn.Module):
 
         self.logit_nonl = AttentionGate(self.up[-1])
         self.logit_conv = nn.Conv2d(self.up[-1], self.out_features, 1)
-
-
-    def __str__(self):
-        fmt = ('Unet:\n'
-               'path_down: [\n'
-               '\t{}\n'
-               ']\n'
-               'path_up: [\n'
-               '\t{}\n'
-               ']\n'
-               'logits: {} -> {}'
-              )
-        pd = '\n\t'.join(str(l) for l in self.path_down)
-        pu = '\n\t'.join(str(l) for l in self.path_up)
-        msg = fmt.format(pd, pu, self.up[-1], self.out_features)
-        return msg
 
 
     def forward(self, inp):

@@ -65,10 +65,11 @@ def print_dict(d, prec=3):
     return ','.join('{}: {}'.format(k, fmt_value(v, prec=prec)) for k, v in d.items())
 
 
-def maybe_make_dir(fname_path):
+def maybe_make_dir(fname_path, silent=False):
     path, _ = os.path.split(fname_path)
     if not os.path.isdir(path):
-        print('Creating new directory', path)
+        if not silent:
+            print('Creating new directory', path)
         os.makedirs(path)
 
 

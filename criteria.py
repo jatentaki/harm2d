@@ -9,19 +9,25 @@ class Criterion(nn.Module):
         self.name = name if name is not None else type(self).__name__
 
 class PrecRec(Criterion):
-    def __init__(self, n_thresholds=10):
+    def __init__(self, n_thresholds=10, masked=True):
         self.n_thresholds = n_thresholds
-        self.thresholds = torch.linspace(0, 1, n_thresholds + 2)[1:-1]
+        self.thresholds = torch.linspace(0, 1, n_thresholds + 2)[1:-1].cuda()
         self.classes = torch.zeros(4, n_thresholds, dtype=torch.int64)
+        self.masked = masked
 
     @utils.size_adaptive
-    def __call__(self, prediction, mask, target):
-        sigmoids = torch.sigmoid(prediction).cpu()
-        if mask is not None:
-            mask = mask.to(torch.uint8).cpu()
-            target = target[mask].to(torch.uint8).cpu()
+    def __call__(self, *args):
+        if self.masked:
+            prediction, mask, target = args
+            sigmoids = torch.sigmoid(prediction)
+            mask = mask.to(torch.uint8)
             sigmoids = sigmoids[mask]
+            target = target[mask]
+        else:
+            prediction, target = args
+            sigmoids = torch.sigmoid(prediction)
 
+        target = target.to(torch.uint8)
         for i, threshold in enumerate(self.thresholds):
             positive = sigmoids > threshold
 

@@ -53,12 +53,6 @@ class UnetDownBlock(nn.Module):
         return y_gated, y
 
 
-    def __repr__(self):
-        fmt = 'UnetDownBlock ({}) {} -> {}.'
-        msg = fmt.format(self.name, self.in_repr, self.out_repr)
-        return msg
-
-
 @localized_module
 class UnetUpBlock(nn.Module):
     def __init__(self, bottom_repr, horizontal_repr, out_repr, size=5):
@@ -89,12 +83,6 @@ class UnetUpBlock(nn.Module):
         y = self.conv2(y)
 
         return y
-
-
-    def __repr__(self):
-        fmt = 'UnetUpBlock ({}) bot {} x hor {} -> {}.'
-        msg = fmt.format(self.name, self.bottom_repr, self.horizontal_repr, self.out_repr)
-        return msg
 
 
 hunet_default_down = [
@@ -143,21 +131,6 @@ class HUnet(nn.Module):
         self.n_params = 0
         for param in self.parameters():
             self.n_params += param.numel()
-
-    def __repr__(self):
-        fmt = ('HUnet with {} degrees of freedom:\n'
-               'path_down: [\n'
-               '\t{}\n'
-               ']\n'
-               'path_up: [\n'
-               '\t{}\n'
-               ']\n'
-               'logits: {} -> {}'
-              )
-        pd = '\n\t'.join(repr(l) for l in self.path_down)
-        pu = '\n\t'.join(repr(l) for l in self.path_up)
-        msg = fmt.format(self.n_params, pd, pu, self.up[-1], self.out_features)
-        return msg
 
 
     @dimchecked
