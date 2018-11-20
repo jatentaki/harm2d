@@ -169,8 +169,8 @@ if __name__ == '__main__':
             num_workers=args.workers
         )
 
-        down = [(5, 7, 5), (5, 5, 5), (3, 5, 3), (3, 5, 3)]
-        up = [(5, 5, 5), (3, 5, 3), (9,)]
+        down = [(4, 5), (10, 7), (10, 7)]
+        up = [(10, 7), (9,)]
         if args.model == 'baseline':
             down = [repr_to_n(d) for d in down]
             up = [repr_to_n(u) for u in up]
@@ -230,10 +230,12 @@ if __name__ == '__main__':
             prec_rec = PrecRec(masked=False, n_thresholds=100)
             test(
                 network, val_loader, criteria, logger=logger,
-                callbacks=[prec_rec]
+                callbacks=[prec_rec], early_stop=args.early_stop
             )
-            f1, thres = prec_rec.best_f1()
-            print('F1', f1, 'at', thres)
+            f1, f1_thres = prec_rec.best_f1()
+            print('F1', f1, 'at', f1_thres)
+            iou, iou_thres = prec_rec.best_iou()
+            print('IoU', iou, 'at', iou_thres)
 
         elif args.action == 'train':
             scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(

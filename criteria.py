@@ -44,22 +44,30 @@ class PrecRec(Criterion):
             self.classes[:, i] += results
 
     def tp(self):
-        return self.classes[0]
+        return self.classes[0].float()
 
     def fp(self):
-        return self.classes[1]
+        return self.classes[1].float()
 
     def tn(self):
-        return self.classes[2]
+        return self.classes[2].float()
 
     def fn(self):
-        return self.classes[3]
+        return self.classes[3].float()
 
     def prec_rec(self):
-        prec = self.tp().float() / (self.tp().float() + self.fp().float())
-        rec = self.tp().float() / (self.tp().float() + self.fn().float())
+        prec = self.tp() / (self.tp() + self.fp())
+        rec  = self.tp() / (self.tp() + self.fn())
 
         return prec, rec
+
+    def iou(self):
+        return self.tp() / (self.tp() + self.fp() + self.fn())
+
+    def best_iou(self):
+        iou = self.iou()
+        argmax = iou.argmax().item()
+        return iou[argmax].item(), self.thresholds[argmax].item()
 
     def best_f1(self):
         prec, rec = self.prec_rec()
