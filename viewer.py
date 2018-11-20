@@ -16,8 +16,11 @@ def is_nr_dir(name):
 dirs = [f for f in os.listdir(args.path) if is_nr_dir(f)]
 
 for dir in dirs:
-    for file in (f for f in os.listdir(os.path.join(args.path, dir)) if f.endswith('.npy')):
-        plt.figure()
+    dir_p = os.path.join(args.path, dir)
+    files = [f for f in os.listdir(dir_p) if f.endswith('.npy')]
+    fig, axes = plt.subplots(1, len(files))
+    fig.suptitle(dir_p)
+    for file, ax in zip(files, axes):
         c = np.load(os.path.join(args.path, dir, file))
-        plt.imshow(c)
+        ax.imshow(c)
     plt.show()

@@ -84,7 +84,8 @@ def inspect(network, loader, path, early_stop=None, criteria=[]):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='PyTorch 2d segmentation')
     parser.add_argument('data_path', metavar='DIR', help='path to the dataset')
-    parser.add_argument('artifacts', metavar='DIR', help='path to store artifacts')
+    parser.add_argument('artifacts', metavar='DIR',
+                        help='path to store artifacts')
 
     parser.add_argument('model', choices=['harmonic', 'baseline'])
     parser.add_argument('action', choices=['train', 'evaluate', 'inspect'])
@@ -108,8 +109,8 @@ if __name__ == '__main__':
     parser.add_argument('-s', '--early_stop', default=None, type=int,
                         help='stop early after n batches')
     parser.add_argument('--restart-checkpoint', action='store_true',
-                        help='consider a loaded checkpoint to be epoch 0 with 0' + \
-                        'best performance')
+                        help=('consider a loaded checkpoint to be epoch '
+                        '0 with 0 best performance'))
 
     args = parser.parse_args()
     
@@ -130,25 +131,28 @@ if __name__ == '__main__':
         warnings.simplefilter("ignore")
         logger.add_msg('Ignoring warnings')
 
-        resize = isic_loader.ResizeTransform((1024, 768))
+        resize_size = (1024, 768)
+        crop_size = (584, 584)#(920, 584)
+        resize = isic_loader.ResizeTransform(resize_size)
 
         train_transform = isic_loader.Compose([
             resize,
             isic_loader.Lift(tv.transforms.ToTensor()),
-            isic_loader.RandomCropTransform((564, 564))
+            isic_loader.RandomCropTransform(crop_size)
         ])
 
         test_transform = isic_loader.Compose([
             resize,
             isic_loader.Lift(tv.transforms.ToTensor()),
-            isic_loader.CenterCropTransform((564, 564))
+            isic_loader.CenterCropTransform(crop_size)
         ])
 
         train_data = isic_loader.ISICDataset(
             args.data_path + '/train', global_transform=train_transform
         )
         train_loader = DataLoader(
-            train_data, batch_size=args.batch_size, shuffle=True, num_workers=args.workers
+            train_data, batch_size=args.batch_size, shuffle=True,
+            num_workers=args.workers
         )
 
         if args.test_on_train:
@@ -161,11 +165,12 @@ if __name__ == '__main__':
             )
 
         val_loader = DataLoader(
-            val_data, batch_size=args.batch_size, shuffle=False, num_workers=args.workers
+            val_data, batch_size=args.batch_size, shuffle=False,
+            num_workers=args.workers
         )
 
-        down = [(2, 5, 2), (5, 7, 5), (5, 7, 5)]
-        up = [(5, 7, 5), (9,)]
+        down = [(5, 7, 5), (5, 5, 5), (3, 5, 3), (3, 5, 3)]
+        up = [(5, 5, 5), (3, 5, 3), (9,)]
         if args.model == 'baseline':
             down = [repr_to_n(d) for d in down]
             up = [repr_to_n(u) for u in up]
@@ -173,7 +178,7 @@ if __name__ == '__main__':
                 up=up, down=down, in_features=3
             )
         elif args.model == 'harmonic':
-            network = HUnet(in_features=3, down=down, up=up)
+            network = HUnet(in_features=3, down=down, up=up, size=5, radius=2)
 
         cuda = torch.cuda.is_available()
 
@@ -198,7 +203,7 @@ if __name__ == '__main__':
 
         criteria = [loss_fn]
 
-#        if args.model == 'baseline':
+        # jit the model
         example = next(iter(train_loader))[0].cuda()
         network = torch.jit.trace(network, example)
 
@@ -222,8 +227,11 @@ if __name__ == '__main__':
                 criteria=criteria, early_stop=args.early_stop
             )
         elif args.action == 'evaluate':
-            prec_rec = PrecRec(masked=False)
-            test(network, val_loader, criteria, logger=logger, callbacks=[prec_rec])
+            prec_rec = PrecRec(masked=False, n_thresholds=100)
+            test(
+                network, val_loader, criteria, logger=logger,
+                callbacks=[prec_rec]
+            )
             f1, thres = prec_rec.best_f1()
             print('F1', f1, 'at', thres)
 
@@ -243,7 +251,9 @@ if __name__ == '__main__':
                     early_stop=args.early_stop, logger=logger
                 )
                 scheduler.step(score)
-                save_checkpoint(epoch, score, network, optim, path=args.artifacts)
+                save_checkpoint(
+                    epoch, score, network, optim, path=args.artifacts
+                )
 
                 if score > best_score:
                     best_score = score 

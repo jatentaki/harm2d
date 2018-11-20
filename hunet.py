@@ -16,27 +16,30 @@ def size_is_pow2(t):
 
 
 class BNConv2d(nn.Module):
-    def __init__(self, repr_in, repr_out, size):
+    def __init__(self, repr_in, repr_out, size, radius=None):
         super(BNConv2d, self).__init__()
 
         self.bn = d2.BatchNorm2d(repr_in)
-        self.conv = d2.HConv2d(repr_in, repr_out, size)
+        self.conv = d2.HConv2d(repr_in, repr_out, size, radius=radius)
 
     def forward(self, x):
-        return self.conv(self.bn(x))
+        y = self.bn(x)
+        y = self.conv(y)
+
+        return y
 
 @localized_module
 class UnetDownBlock(nn.Module):
-    def __init__(self, in_repr, out_repr, size=5):
+    def __init__(self, in_repr, out_repr, size=5, radius=None):
         super(UnetDownBlock, self).__init__()
 
         self.in_repr = in_repr
         self.out_repr = out_repr
         
-        self.conv1 = BNConv2d(in_repr, out_repr, size)
+        self.conv1 = BNConv2d(in_repr, out_repr, size, radius=radius)
         self.nonl1 = d2.ScalarGate2d(out_repr)
 
-        self.conv2 = BNConv2d(out_repr, out_repr, size)
+        self.conv2 = BNConv2d(out_repr, out_repr, size, radius=radius)
         self.nonl2 = d2.ScalarGate2d(out_repr)
     
 
@@ -55,7 +58,9 @@ class UnetDownBlock(nn.Module):
 
 @localized_module
 class UnetUpBlock(nn.Module):
-    def __init__(self, bottom_repr, horizontal_repr, out_repr, size=5):
+    def __init__(self, bottom_repr, horizontal_repr, out_repr,
+                 size=5, radius=None):
+
         super(UnetUpBlock, self).__init__()
 
         self.bottom_repr = bottom_repr
@@ -64,10 +69,10 @@ class UnetUpBlock(nn.Module):
         self.out_repr = out_repr
 
         self.nonl1 = d2.ScalarGate2d(self.cat_repr)
-        self.conv1 = BNConv2d(self.cat_repr, self.cat_repr, size)
+        self.conv1 = BNConv2d(self.cat_repr, self.cat_repr, size, radius=radius)
 
         self.nonl2 = d2.ScalarGate2d(self.cat_repr)
-        self.conv2 = BNConv2d(self.cat_repr, self.out_repr, size)
+        self.conv2 = BNConv2d(self.cat_repr, self.out_repr, size, radius=radius)
 
 
     @dimchecked
@@ -98,7 +103,7 @@ hunet_default_up= [
 @localized_module
 class HUnet(nn.Module):
     def __init__(self, in_features=1, out_features=1, up=hunet_default_up,
-                 down=hunet_default_down):
+                 down=hunet_default_down, size=5, radius=None):
         super(HUnet, self).__init__()
 
         if not len(down) == len(up) + 1:
@@ -115,14 +120,19 @@ class HUnet(nn.Module):
         down_dims = [(in_features, )] + down
         self.path_down = nn.ModuleList()
         for i, (d_in, d_out) in enumerate(zip(down_dims[:-1], down_dims[1:])):
-            block = UnetDownBlock(d_in, d_out, name='down_{}'.format(i))
+            block = UnetDownBlock(
+                d_in, d_out, size=size, radius=radius, name='down_{}'.format(i)
+            )
             self.path_down.append(block)
 
         bot_dims = [down[-1]] + up
         hor_dims = down_dims[-2::-1]
         self.path_up = nn.ModuleList()
         for i, (d_bot, d_hor, d_out) in enumerate(zip(bot_dims, hor_dims, up)):
-            block = UnetUpBlock(d_bot, d_hor, d_out, name='up_{}'.format(i))
+            block = UnetUpBlock(
+                d_bot, d_hor, d_out, size=size, radius=radius,
+                name='up_{}'.format(i)
+            )
             self.path_up.append(block)
 
         self.logit_nonl = d2.ScalarGate2d(up[-1])
