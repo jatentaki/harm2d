@@ -110,6 +110,8 @@ if __name__ == '__main__':
     parser.add_argument('--restart-checkpoint', action='store_true',
                         help=('consider a loaded checkpoint to be epoch '
                         '0 with 0 best performance'))
+    parser.add_argument('-nj', '--no-jit', action='store_true',
+                        help='disable jit compilation for the model')
 
     args = parser.parse_args()
     
@@ -132,7 +134,7 @@ if __name__ == '__main__':
 
         resize_size = (1024, 768)
         crop_size = (584, 584)#(920, 584)
-        resize = isic_loader.ResizeTransform(resize_size)
+        resize = isic_loader.AspectPreservingResizeTransform(resize_size)
 
         train_transform = isic_loader.Compose([
             resize,
@@ -202,9 +204,9 @@ if __name__ == '__main__':
 
         criteria = [loss_fn]
 
-        # jit the model
-        example = next(iter(train_loader))[0][0:1].cuda()
-        network = torch.jit.trace(network, example, check_trace=False, optimize=False)
+        if not args.no_jit:
+            example = next(iter(train_loader))[0][0:1].cuda()
+            network = torch.jit.trace(network, example, check_trace=False, optimize=False)
 
         if args.load:
             start_epoch, best_score, model_dict, optim_dict = load_checkpoint(args.load)

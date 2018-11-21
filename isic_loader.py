@@ -33,6 +33,37 @@ class ResizeTransform(Lift):
 
         super(ResizeTransform, self).__init__(resize)
 
+class AspectPreservingResizeTransform(Lift):
+    def __init__(self, target_size):
+        self.w, self.h = target_size
+
+        def resize(img):
+            if img.size == (self.w, self.h):
+                return img
+
+            w_ratio = self.w / img.size[0]
+            h_ratio = self.h / img.size[1]
+            ratio = min(w_ratio, h_ratio)
+
+            new_size = int(ratio * img.size[0]), int(ratio * img.size[1])
+            interpolation = Image.NEAREST if img.mode == 'L' else Image.BICUBIC
+            resized = img.resize(new_size, resample=interpolation)
+
+            assert resized.size[0] <= self.w and resized.size[1] <= self.h
+
+            padded = Image.new(img.mode, (self.w, self.h))
+            padded.paste(
+                resized,
+                (
+                    (padded.size[0] - resized.size[0]) // 2,
+                    (padded.size[1] - resized.size[1]) // 2
+                )
+            )
+
+            return padded
+
+        super(AspectPreservingResizeTransform, self).__init__(resize)
+
 
 class RandomCropTransform:
     def __init__(self, target_size):
@@ -140,20 +171,21 @@ class ISICDataset:
 if __name__ == '__main__':
     target_size = 1024, 768
     trans = Compose([
-        ResizeTransform(target_size),
+        AspectPreservingResizeTransform(target_size),
         Lift(T.ToTensor()),
-        RandomCropTransform((564, 564))
+    #    RandomCropTransform((564, 564))
     ])
     d = ISICDataset(
         '/home/jatentaki/Storage/jatentaki/Datasets/isic2018',
         global_transform=trans
     )
-    img, lbl = d[172]
-
     import matplotlib.pyplot as plt
-    img = img.numpy().transpose(1, 2, 0)
-    lbl = lbl.numpy()[0]
-    plt.imshow(img)
-    plt.figure()
-    plt.imshow(lbl)
-    plt.show()
+    for i in range(20, 50):
+        img, lbl = d[i]
+
+        img = img.numpy().transpose(1, 2, 0)
+        lbl = lbl.numpy()[0]
+        plt.imshow(img)
+        plt.figure()
+        plt.imshow(lbl)
+        plt.show()

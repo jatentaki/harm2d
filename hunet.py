@@ -163,8 +163,7 @@ class HUnet(nn.Module):
             msg = fmt.format(self.in_features, inp.size(1))
             raise ValueError(msg)
 
-        print(inp.shape)
-        np.save('img.npy', inp.detach().cpu().numpy())
+#        np.save('img.npy', inp.detach().cpu().numpy())
         features_gated = harmonic.cmplx.from_real(inp)
         features_down = []
         for i, layer in enumerate(self.path_down):
