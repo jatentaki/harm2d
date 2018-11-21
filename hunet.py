@@ -1,4 +1,5 @@
 import torch, itertools
+import numpy as np
 import torch.nn as nn
 import torch.nn.functional as F
 
@@ -53,6 +54,12 @@ class UnetDownBlock(nn.Module):
         y = self.conv2(y)
         y_gated = self.nonl2(y)
 
+#        np.save('fmap_' + self.name + '.npy', y_gated.detach().cpu().numpy())
+#        np.save(
+#            'kernels_' + self.name + '.npy',
+#            self.conv2.conv.synthesize().detach().cpu().numpy()
+#        )
+
         return y_gated, y
 
 
@@ -86,6 +93,12 @@ class UnetUpBlock(nn.Module):
         y = self.conv1(y)
         y = self.nonl2(y)
         y = self.conv2(y)
+
+#        np.save('fmap_' + self.name + '.npy', y.detach().cpu().numpy())
+#        np.save(
+#            'kernels_' + self.name + '.npy',
+#            self.conv2.conv.synthesize().detach().cpu().numpy()
+#        )
 
         return y
 
@@ -150,6 +163,8 @@ class HUnet(nn.Module):
             msg = fmt.format(self.in_features, inp.size(1))
             raise ValueError(msg)
 
+        print(inp.shape)
+        np.save('img.npy', inp.detach().cpu().numpy())
         features_gated = harmonic.cmplx.from_real(inp)
         features_down = []
         for i, layer in enumerate(self.path_down):
