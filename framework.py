@@ -1,6 +1,5 @@
 import torch, os
 from utils import AvgMeter, open_file, print_dict, size_adaptive_, fmt_value
-import criteria
 from tqdm import tqdm
 
 def train(network, dataset, loss_fn, optimizer, epoch, early_stop=None, logger=None):

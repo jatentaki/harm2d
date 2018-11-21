@@ -6,10 +6,9 @@ import numpy as np
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
-import isic_loader, losses
+import isic_loader, losses, criteria as criteria_mod
 
 from utils import size_adaptive_, maybe_make_dir, print_dict
-from criteria import PrecRec
 from framework import train, test, Logger
 from reg_unet import Unet, repr_to_n
 from hunet import HUnet
@@ -169,8 +168,8 @@ if __name__ == '__main__':
             num_workers=args.workers
         )
 
-        down = [(4, 5), (10, 7), (10, 7)]
-        up = [(10, 7), (9,)]
+        down = [(10, 10, 10, 5), (10, 10, 10, 5), (5, 5, 5, 5), (5, 5, 5, 5)]
+        up = [(5, 5, 5, 5), (10, 10, 10, 5), (20, )]
         if args.model == 'baseline':
             down = [repr_to_n(d) for d in down]
             up = [repr_to_n(u) for u in up]
@@ -204,8 +203,8 @@ if __name__ == '__main__':
         criteria = [loss_fn]
 
         # jit the model
-        example = next(iter(train_loader))[0].cuda()
-        network = torch.jit.trace(network, example)
+        example = next(iter(train_loader))[0][0:1].cuda()
+        network = torch.jit.trace(network, example, check_trace=False, optimize=False)
 
         if args.load:
             start_epoch, best_score, model_dict, optim_dict = load_checkpoint(args.load)
@@ -227,15 +226,19 @@ if __name__ == '__main__':
                 criteria=criteria, early_stop=args.early_stop
             )
         elif args.action == 'evaluate':
-            prec_rec = PrecRec(masked=False, n_thresholds=100)
+#            prec_rec = PrecRec(masked=False, n_thresholds=100)
+            iou = criteria_mod.ISICIoU(n_thresholds=100, masked=False)
+            callbacks = [iou]
             test(
                 network, val_loader, criteria, logger=logger,
-                callbacks=[prec_rec], early_stop=args.early_stop
+                callbacks=callbacks, early_stop=args.early_stop
             )
-            f1, f1_thres = prec_rec.best_f1()
-            print('F1', f1, 'at', f1_thres)
-            iou, iou_thres = prec_rec.best_iou()
-            print('IoU', iou, 'at', iou_thres)
+#            f1, f1_thres = prec_rec.best_f1()
+#            print('F1', f1, 'at', f1_thres)
+#            iou, iou_thres = prec_rec.best_iou()
+#            print('IoU', iou, 'at', iou_thres)
+            best_iou, iou_thres = iou.best_iou()
+            print('IoU', best_iou, 'at', iou_thres)
 
         elif args.action == 'train':
             scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(

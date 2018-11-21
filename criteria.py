@@ -74,3 +74,48 @@ class PrecRec(Criterion):
         f1 = 2 * prec * rec / (prec + rec)
         argmax = f1.argmax().item()
         return f1[argmax].item(), self.thresholds[argmax].item()
+
+class ISICIoU(Criterion):
+    def __init__(self, n_thresholds=10, masked=True):
+        self.n_thresholds = n_thresholds
+        self.thresholds = torch.linspace(0, 1, n_thresholds + 2)[1:-1].cuda()
+        self.results = [utils.AvgMeter() for t in self.thresholds]
+        self.masked = masked
+
+    @utils.size_adaptive
+    def __call__(self, *args):
+        # batch size
+        b = args[0].shape[0]
+
+        if self.masked:
+            prediction, mask, target = args
+            sigmoids = torch.sigmoid(prediction)
+            mask = mask.to(torch.uint8)
+            sigmoids = sigmoids[mask]
+            target = target[mask]
+            mask = mask.reshape(b, -1)
+        else:
+            prediction, target = args
+            sigmoids = torch.sigmoid(prediction)
+
+        target = target.to(torch.uint8)
+        target = target.reshape(b, -1)
+        sigmoids = sigmoids.reshape(b, -1)
+
+        for i, threshold in enumerate(self.thresholds):
+            positive = sigmoids > threshold
+
+            tp = (positive & target).sum(dim=1).float()
+            fp = (positive & ~target).sum(dim=1).float()
+            fn = (~positive & target).sum(dim=1).float()
+
+            ious = tp / (tp + fp + fn)
+            ious[ious < 0.65] = 0.
+
+            for iou in ious:
+                self.results[i].update(iou)
+
+    def best_iou(self):
+        results = torch.tensor([m.avg for m in self.results])
+        argmax = results.argmax().item()
+        return results[argmax].item(), self.thresholds[argmax].item()
