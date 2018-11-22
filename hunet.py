@@ -122,9 +122,6 @@ class HUnet(nn.Module):
         if not len(down) == len(up) + 1:
             raise ValueError("`down` must be 1 item longer than `up`")
 
-        if not (isinstance(up[-1], tuple) and len(up[-1]) == 1):
-            raise ValueError("last repr in `up` must be purely order 0")
-
         self.up = up
         self.down = down
         self.in_features = in_features
@@ -186,8 +183,8 @@ class HUnet(nn.Module):
             f_b = layer(f_b, f_h)
 
         f_gated = self.logit_nonl(f_b)
-        f_real = f_gated[0, ...]
-        return self.logit_conv(f_real)
+        magnitudes = harmonic.cmplx.magnitude(f_gated)
+        return self.logit_conv(magnitudes)
 
     def l2_params(self):
         return [p for n, p in self.named_parameters() if 'bias' not in n]

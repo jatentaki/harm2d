@@ -171,7 +171,7 @@ if __name__ == '__main__':
         )
 
         down = [(10, 10, 10, 5), (10, 10, 10, 5), (5, 5, 5, 5), (5, 5, 5, 5)]
-        up = [(5, 5, 5, 5), (10, 10, 10, 5), (20, )]
+        up = [(5, 5, 5, 5), (10, 10, 10, 5), (5, 5, 5, 5)]
         if args.model == 'baseline':
             down = [repr_to_n(d) for d in down]
             up = [repr_to_n(u) for u in up]
