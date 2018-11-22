@@ -6,10 +6,12 @@ import torch.nn.functional as F
 import harmonic
 from harmonic import d2
 
-from torch_localize import localized_module
+from torch_localize import localized_module, localized
 from torch_dimcheck import dimchecked
 
 from utils import cut_to_match
+
+SAVE_NPY = False
 
 def size_is_pow2(t):
     ''' Check if the trailing spatial dimensions are powers of 2 '''
@@ -29,21 +31,22 @@ class BNConv2d(nn.Module):
 
         return y
 
-@localized_module
 class UnetDownBlock(nn.Module):
-    def __init__(self, in_repr, out_repr, size=5, radius=None):
+    def __init__(self, in_repr, out_repr, size=5, radius=None, name=None):
         super(UnetDownBlock, self).__init__()
 
+        self.name = name
         self.in_repr = in_repr
         self.out_repr = out_repr
         
         self.conv1 = BNConv2d(in_repr, out_repr, size, radius=radius)
-        self.nonl1 = d2.ScalarGate2d(out_repr)
+        self.nonl1 = d2.ScalarGate2d(out_repr, name=self.name + '_gate1')
 
         self.conv2 = BNConv2d(out_repr, out_repr, size, radius=radius)
-        self.nonl2 = d2.ScalarGate2d(out_repr)
+        self.nonl2 = d2.ScalarGate2d(out_repr, name=self.name + '_gate2')
     
 
+    @localized
     @dimchecked
     def forward(self, x: [2, 'b', 'fi', 'hi', 'wi']
                )     -> ([2, 'b', 'fo', 'ho', 'wo'],
@@ -54,34 +57,36 @@ class UnetDownBlock(nn.Module):
         y = self.conv2(y)
         y_gated = self.nonl2(y)
 
-#        np.save('fmap_' + self.name + '.npy', y_gated.detach().cpu().numpy())
-#        np.save(
-#            'kernels_' + self.name + '.npy',
-#            self.conv2.conv.synthesize().detach().cpu().numpy()
-#        )
+        if SAVE_NPY:
+            np.save('fmap_' + self.name + '.npy', y.detach().cpu().numpy())
+            np.save(
+                'kernels_' + self.name + '.npy',
+                self.conv2.conv.synthesize().detach().cpu().numpy()
+            )
 
         return y_gated, y
 
 
-@localized_module
 class UnetUpBlock(nn.Module):
     def __init__(self, bottom_repr, horizontal_repr, out_repr,
-                 size=5, radius=None):
+                 size=5, radius=None, name=None):
 
         super(UnetUpBlock, self).__init__()
 
+        self.name = name
         self.bottom_repr = bottom_repr
         self.horizontal_repr = horizontal_repr
         self.cat_repr = harmonic.cat_repr(bottom_repr, horizontal_repr)
         self.out_repr = out_repr
 
-        self.nonl1 = d2.ScalarGate2d(self.cat_repr)
+        self.nonl1 = d2.ScalarGate2d(self.cat_repr, name=self.name + '_gate1')
         self.conv1 = BNConv2d(self.cat_repr, self.cat_repr, size, radius=radius)
 
-        self.nonl2 = d2.ScalarGate2d(self.cat_repr)
+        self.nonl2 = d2.ScalarGate2d(self.cat_repr, name=self.name + '_gate2')
         self.conv2 = BNConv2d(self.cat_repr, self.out_repr, size, radius=radius)
 
 
+    @localized
     @dimchecked
     def forward(self, bottom:     [2, 'b', 'fb', 'hb', 'wb'],
                       horizontal: [2, 'b', 'fh', 'hh', 'wh']
@@ -91,14 +96,13 @@ class UnetUpBlock(nn.Module):
         y = d2.cat2d(bottom, self.bottom_repr, horizontal, self.horizontal_repr)
         y = self.nonl1(y)
         y = self.conv1(y)
+        if SAVE_NPY:
+            np.save('fmap_pre_' + self.name + '.npy', y.detach().cpu().numpy())
         y = self.nonl2(y)
+        if SAVE_NPY:
+            np.save('fmap_post_' + self.name + '.npy', y.detach().cpu().numpy())
         y = self.conv2(y)
 
-#        np.save('fmap_' + self.name + '.npy', y.detach().cpu().numpy())
-#        np.save(
-#            'kernels_' + self.name + '.npy',
-#            self.conv2.conv.synthesize().detach().cpu().numpy()
-#        )
 
         return y
 
@@ -145,7 +149,7 @@ class HUnet(nn.Module):
             )
             self.path_up.append(block)
 
-        self.logit_nonl = d2.ScalarGate2d(up[-1])
+        self.logit_nonl = d2.ScalarGate2d(up[-1], name='logit_nonl')
         self.logit_conv = nn.Conv2d(sum(up[-1]), self.out_features, 1)
 
         self.n_params = 0
@@ -160,7 +164,9 @@ class HUnet(nn.Module):
             msg = fmt.format(self.in_features, inp.size(1))
             raise ValueError(msg)
 
-#        np.save('img.npy', inp.detach().cpu().numpy())
+        if SAVE_NPY:
+            np.save('img.npy', inp.detach().cpu().numpy())
+
         features_gated = harmonic.cmplx.from_real(inp)
         features_down = []
         for i, layer in enumerate(self.path_down):

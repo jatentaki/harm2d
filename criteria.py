@@ -1,6 +1,5 @@
 import torch
 import torch.nn as nn
-import numpy as np
 import utils
 
 class Criterion(nn.Module):
@@ -19,14 +18,13 @@ class PrecRec(Criterion):
     def __call__(self, *args):
         if self.masked:
             prediction, mask, target = args
-            sigmoids = torch.sigmoid(prediction)
             mask = mask.to(torch.uint8)
-            sigmoids = sigmoids[mask]
+            prediction = prediction[mask]
             target = target[mask]
         else:
             prediction, target = args
-            sigmoids = torch.sigmoid(prediction)
 
+        sigmoids = torch.sigmoid(predictions)
         target = target.to(torch.uint8)
         for i, threshold in enumerate(self.thresholds):
             positive = sigmoids > threshold
@@ -84,21 +82,18 @@ class ISICIoU(Criterion):
 
     @utils.size_adaptive
     def __call__(self, *args):
-        # batch size
-        b = args[0].shape[0]
-
         if self.masked:
             prediction, mask, target = args
-            sigmoids = torch.sigmoid(prediction)
             mask = mask.to(torch.uint8)
-            sigmoids = sigmoids[mask]
+            prediction = prediction[mask]
             target = target[mask]
-            mask = mask.reshape(b, -1)
         else:
             prediction, target = args
-            sigmoids = torch.sigmoid(prediction)
+
+        sigmoids = torch.sigmoid(prediction)
 
         target = target.to(torch.uint8)
+        b = args[0].shape[0]
         target = target.reshape(b, -1)
         sigmoids = sigmoids.reshape(b, -1)
 

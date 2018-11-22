@@ -156,9 +156,10 @@ class ISICDataset:
         id = str(id).zfill(7)
         img = self.fetch_img(id)
         lbl = self.fetch_lbl(id)
+        mask = Image.new('L', lbl.size, color=255)
 
         if self.global_transform:
-            img, lbl = self.global_transform(img, lbl)
+            img, mask, lbl = self.global_transform(img, mask, lbl)
 
         if self.img_transform:
             img = self.img_transform(img)
@@ -166,12 +167,13 @@ class ISICDataset:
         if self.lbl_transform:
             lbl = self.lbl_transform(lbl)
 
-        return img, lbl
+        return img, mask, lbl
 
 if __name__ == '__main__':
     target_size = 1024, 768
     trans = Compose([
         AspectPreservingResizeTransform(target_size),
+#        Lift(T.Pad(88)),
         Lift(T.ToTensor()),
     #    RandomCropTransform((564, 564))
     ])
@@ -181,11 +183,13 @@ if __name__ == '__main__':
     )
     import matplotlib.pyplot as plt
     for i in range(20, 50):
-        img, lbl = d[i]
+        img, mask, lbl = d[i]
 
         img = img.numpy().transpose(1, 2, 0)
         lbl = lbl.numpy()[0]
         plt.imshow(img)
         plt.figure()
         plt.imshow(lbl)
+        plt.figure()
+        plt.imshow(mask.to(torch.uint8).numpy()[0])
         plt.show()

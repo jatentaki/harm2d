@@ -194,7 +194,7 @@ if __name__ == '__main__':
         if cuda:
             network = network.cuda()
 
-        loss_fn = size_adaptive_(losses.BCE)(masked=False)
+        loss_fn = size_adaptive_(losses.BCE)()
         loss_fn.name = 'BCE'
 
         optim = torch.optim.Adam([
@@ -229,7 +229,7 @@ if __name__ == '__main__':
             )
         elif args.action == 'evaluate':
 #            prec_rec = PrecRec(masked=False, n_thresholds=100)
-            iou = criteria_mod.ISICIoU(n_thresholds=100, masked=False)
+            iou = criteria_mod.ISICIoU(n_thresholds=100)
             callbacks = [iou]
             test(
                 network, val_loader, criteria, logger=logger,
