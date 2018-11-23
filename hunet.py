@@ -22,7 +22,7 @@ class BNConv2d(nn.Module):
     def __init__(self, repr_in, repr_out, size, radius=None):
         super(BNConv2d, self).__init__()
 
-        self.bn = d2.BatchNorm2d(repr_in)
+        self.bn = d2.InstanceNorm2d(repr_in)
         self.conv = d2.HConv2d(repr_in, repr_out, size, radius=radius)
 
     def forward(self, x):
@@ -40,10 +40,10 @@ class UnetDownBlock(nn.Module):
         self.out_repr = out_repr
         
         self.conv1 = BNConv2d(in_repr, out_repr, size, radius=radius)
-        self.nonl1 = d2.ScalarGate2d(out_repr, name=self.name + '_gate1')
+        self.nonl1 = d2.ScalarGate2d(out_repr)
 
         self.conv2 = BNConv2d(out_repr, out_repr, size, radius=radius)
-        self.nonl2 = d2.ScalarGate2d(out_repr, name=self.name + '_gate2')
+        self.nonl2 = d2.ScalarGate2d(out_repr)
     
 
     @localized
@@ -55,14 +55,12 @@ class UnetDownBlock(nn.Module):
         y = self.conv1(x)
         y = self.nonl1(y)
         y = self.conv2(y)
+
         y_gated = self.nonl2(y)
 
         if SAVE_NPY:
-            np.save('fmap_' + self.name + '.npy', y.detach().cpu().numpy())
-            np.save(
-                'kernels_' + self.name + '.npy',
-                self.conv2.conv.synthesize().detach().cpu().numpy()
-            )
+            np.save('fmap_pre_' + self.name + '.npy', y.detach().cpu().numpy())
+            np.save('fmap_post_' + self.name + '.npy', y_gated.detach().cpu().numpy())
 
         return y_gated, y
 
@@ -79,10 +77,10 @@ class UnetUpBlock(nn.Module):
         self.cat_repr = harmonic.cat_repr(bottom_repr, horizontal_repr)
         self.out_repr = out_repr
 
-        self.nonl1 = d2.ScalarGate2d(self.cat_repr, name=self.name + '_gate1')
+        self.nonl1 = d2.ScalarGate2d(self.cat_repr)
         self.conv1 = BNConv2d(self.cat_repr, self.cat_repr, size, radius=radius)
 
-        self.nonl2 = d2.ScalarGate2d(self.cat_repr, name=self.name + '_gate2')
+        self.nonl2 = d2.ScalarGate2d(self.cat_repr)
         self.conv2 = BNConv2d(self.cat_repr, self.out_repr, size, radius=radius)
 
 
@@ -149,7 +147,7 @@ class HUnet(nn.Module):
             )
             self.path_up.append(block)
 
-        self.logit_nonl = d2.ScalarGate2d(up[-1], name='logit_nonl')
+        self.logit_nonl = d2.ScalarGate2d(up[-1])
         self.logit_conv = nn.Conv2d(sum(up[-1]), self.out_features, 1)
 
         self.n_params = 0
