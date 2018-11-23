@@ -1,6 +1,6 @@
 import torch, argparse, functools, itertools, os, warnings
 import torch.nn.functional as F
-import torchvision as tv
+import torchvision.transforms as T
 import numpy as np
 
 from torch.utils.data import DataLoader
@@ -133,19 +133,21 @@ if __name__ == '__main__':
         logger.add_msg('Ignoring warnings')
 
         resize_size = (1024, 768)
-        crop_size = (584, 584)#(920, 584)
+#        crop_size = (584, 584)#(920, 584)
         resize = isic_loader.AspectPreservingResizeTransform(resize_size)
 
         train_transform = isic_loader.Compose([
             resize,
-            isic_loader.Lift(tv.transforms.ToTensor()),
-            isic_loader.RandomCropTransform(crop_size)
+            isic_loader.Lift(T.Pad(88)),
+            isic_loader.Lift(T.ToTensor()),
+#            isic_loader.RandomCropTransform(crop_size)
         ])
 
         test_transform = isic_loader.Compose([
             resize,
-            isic_loader.Lift(tv.transforms.ToTensor()),
-            isic_loader.CenterCropTransform(crop_size)
+            isic_loader.Lift(T.Pad(88)),
+            isic_loader.Lift(T.ToTensor()),
+#            isic_loader.CenterCropTransform(crop_size)
         ])
 
         train_data = isic_loader.ISICDataset(
@@ -170,8 +172,8 @@ if __name__ == '__main__':
             num_workers=args.workers
         )
 
-        down = [(10, 10, 10, 5), (10, 10, 10, 5), (5, 5, 5, 5), (5, 5, 5, 5)]
-        up = [(5, 5, 5, 5), (10, 10, 10, 5), (5, 5, 5, 5)]
+        down = [(8, 8, 8, 5), (8, 8, 8, 5), (5, 5, 5, 5), (5, 5, 5, 5)]
+        up = [(5, 5, 5, 5), (8, 8, 8, 5), (5, 5, 5, 5)]
         if args.model == 'baseline':
             down = [repr_to_n(d) for d in down]
             up = [repr_to_n(u) for u in up]
@@ -244,7 +246,7 @@ if __name__ == '__main__':
 
         elif args.action == 'train':
             scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
-                optim, 'min', patience=2, verbose=True, cooldown=1
+                optim, 'min', patience=8, verbose=True, cooldown=0
             )
 
             for epoch in range(start_epoch, args.epochs):
