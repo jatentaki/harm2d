@@ -15,6 +15,10 @@ def is_nr_dir(name):
     
 dirs = [f for f in os.listdir(args.path) if is_nr_dir(f)]
 
+means = np.array([0.71, 0.57, 0.53]).reshape(1, 1, 3)
+std = np.array([0.17, 0.17, 0.18]).reshape(1, 1, 3)
+pad = 88
+
 for dir in dirs:
     dir_p = os.path.join(args.path, dir)
     files = [f for f in os.listdir(dir_p) if f.endswith('.npy')]
@@ -22,5 +26,11 @@ for dir in dirs:
     fig.suptitle(dir_p)
     for file, ax in zip(files, axes):
         c = np.load(os.path.join(args.path, dir, file))
+        if c.ndim == 3:
+            # fix normalization
+            c = c * std + means
+            c = np.clip(c, 0., 1.)
+            c = c[pad:-pad, pad:-pad, :]
+
         ax.imshow(c)
     plt.show()

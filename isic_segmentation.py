@@ -151,7 +151,8 @@ if __name__ == '__main__':
         ])
 
         train_data = isic_loader.ISICDataset(
-            args.data_path + '/train', global_transform=train_transform
+            args.data_path + '/train', global_transform=train_transform,
+            normalize=True
         )
         train_loader = DataLoader(
             train_data, batch_size=args.batch_size, shuffle=True,
@@ -160,11 +161,13 @@ if __name__ == '__main__':
 
         if args.test_on_train:
             val_data = isic_loader.ISICDataset(
-                args.data_path + '/train', global_transform=test_transform
+                args.data_path + '/train', global_transform=test_transform,
+                normalize=True
             )
         else:
             val_data = isic_loader.ISICDataset(
-                args.data_path + '/test', global_transform=test_transform
+                args.data_path + '/test', global_transform=test_transform,
+                normalize=True
             )
 
         val_loader = DataLoader(
@@ -172,8 +175,8 @@ if __name__ == '__main__':
             num_workers=args.workers
         )
 
-        down = [(8, 8, 8, 5), (8, 8, 8, 5), (5, 5, 5, 5), (5, 5, 5, 5)]
-        up = [(5, 5, 5, 5), (8, 8, 8, 5), (5, 5, 5, 5)]
+        down = [(5, 5, 5, 5), (5, 5, 5, 5), (5, 5, 5, 5), (5, 5, 5, 5)]
+        up = [(5, 5, 5, 5), (5, 5, 5, 5), (5, 5, 5, 5)]
         if args.model == 'baseline':
             down = [repr_to_n(d) for d in down]
             up = [repr_to_n(u) for u in up]

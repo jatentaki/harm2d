@@ -100,10 +100,28 @@ class CenterCropTransform(Lift):
 
         super(CenterCropTransform, self).__init__(crop)
 
+class ISICNormalize:
+    def __init__(self, r=(180., 39.), g=(151., 41.48), b=(139., 45.18)):
+        self.r = r
+        self.g = g
+        self.b = b
+
+        self.mean = torch.tensor([r[0], g[0], b[0]]).reshape(3, 1, 1)
+        self.std = torch.tensor([r[1], g[1], b[1]]).reshape(3, 1, 1)
+
+    def __call__(self, img):
+        mask = (img == 0.).all(dim=0, keepdim=True).expand(3, -1, -1)
+        
+        img = img.clone()
+        img[~mask] = (img[~mask] - self.mean) / self.std
+
+        return img
 
 class ISICDataset:
     def __init__(self, path, img_transform=None,
-                 lbl_transform=None, global_transform=None):
+                 lbl_transform=None, global_transform=None, normalize=False):
+
+        self.normalize = normalize
 
         self.img_p = path + os.path.sep + 'imgs'
         self.lbl_p = path + os.path.sep + 'lbls'
@@ -167,7 +185,20 @@ class ISICDataset:
         if self.lbl_transform:
             lbl = self.lbl_transform(lbl)
 
+        mask = mask.to(torch.uint8)
+
+        if self.normalize:
+            img = self._normalize(img, mask)
+
         return img, mask, lbl
+
+    def _normalize(self, img, mask):
+        mean = torch.tensor([0.71, 0.57, 0.53]).reshape(3, 1, 1)
+        std = torch.tensor([0.17, 0.17, 0.18]).reshape(3, 1, 1)
+
+        demeaned = (img - mean) / std
+
+        return torch.where(mask, demeaned, torch.tensor(0.))
 
 if __name__ == '__main__':
     target_size = 1024, 768
@@ -179,7 +210,7 @@ if __name__ == '__main__':
     ])
     d = ISICDataset(
         '/home/jatentaki/Storage/jatentaki/Datasets/isic2018',
-        global_transform=trans
+        global_transform=trans, normalize=True
     )
     import matplotlib.pyplot as plt
     for i in range(20, 50):
@@ -187,9 +218,9 @@ if __name__ == '__main__':
 
         img = img.numpy().transpose(1, 2, 0)
         lbl = lbl.numpy()[0]
-        plt.imshow(img)
-        plt.figure()
-        plt.imshow(lbl)
-        plt.figure()
-        plt.imshow(mask.to(torch.uint8).numpy()[0])
+        plt.imshow(img[..., 0], vmin=-3, vmax=3)
+#        plt.figure()
+#        plt.imshow(lbl)
+#        plt.figure()
+#        plt.imshow(mask.to(torch.uint8).numpy()[0])
         plt.show()

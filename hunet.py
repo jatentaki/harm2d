@@ -10,6 +10,7 @@ from torch_localize import localized_module, localized
 from torch_dimcheck import dimchecked
 
 from utils import cut_to_match
+from global_gate import GlobalGate2d
 
 SAVE_NPY = False
 
@@ -32,18 +33,25 @@ class BNConv2d(nn.Module):
         return y
 
 class UnetDownBlock(nn.Module):
-    def __init__(self, in_repr, out_repr, size=5, radius=None, name=None):
+    def __init__(self, in_repr, out_repr, size=5, radius=None, name=None,
+                 first_norm=True):
         super(UnetDownBlock, self).__init__()
 
         self.name = name
         self.in_repr = in_repr
         self.out_repr = out_repr
+        self.first_norm = first_norm
         
-        self.conv1 = BNConv2d(in_repr, out_repr, size, radius=radius)
-        self.nonl1 = d2.ScalarGate2d(out_repr)
+        # we don't want to normalize input if its the very first DownBlock
+        if first_norm: 
+            self.conv1 = BNConv2d(in_repr, out_repr, size, radius=radius)
+        else:
+            self.conv1 = d2.HConv2d(in_repr, out_repr, size=size, radius=radius)
+
+        self.nonl1 = GlobalGate2d(out_repr)
 
         self.conv2 = BNConv2d(out_repr, out_repr, size, radius=radius)
-        self.nonl2 = d2.ScalarGate2d(out_repr)
+        self.nonl2 = GlobalGate2d(out_repr)
     
 
     @localized
@@ -77,10 +85,10 @@ class UnetUpBlock(nn.Module):
         self.cat_repr = harmonic.cat_repr(bottom_repr, horizontal_repr)
         self.out_repr = out_repr
 
-        self.nonl1 = d2.ScalarGate2d(self.cat_repr)
+        self.nonl1 = GlobalGate2d(self.cat_repr)
         self.conv1 = BNConv2d(self.cat_repr, self.cat_repr, size, radius=radius)
 
-        self.nonl2 = d2.ScalarGate2d(self.cat_repr)
+        self.nonl2 = GlobalGate2d(self.cat_repr)
         self.conv2 = BNConv2d(self.cat_repr, self.out_repr, size, radius=radius)
 
 
@@ -100,7 +108,6 @@ class UnetUpBlock(nn.Module):
         if SAVE_NPY:
             np.save('fmap_post_' + self.name + '.npy', y.detach().cpu().numpy())
         y = self.conv2(y)
-
 
         return y
 
@@ -132,8 +139,11 @@ class HUnet(nn.Module):
         down_dims = [(in_features, )] + down
         self.path_down = nn.ModuleList()
         for i, (d_in, d_out) in enumerate(zip(down_dims[:-1], down_dims[1:])):
+            first_norm = i != 0
+
             block = UnetDownBlock(
-                d_in, d_out, size=size, radius=radius, name='down_{}'.format(i)
+                d_in, d_out, size=size, radius=radius, name='down_{}'.format(i),
+                first_norm=first_norm
             )
             self.path_down.append(block)
 
@@ -147,7 +157,7 @@ class HUnet(nn.Module):
             )
             self.path_up.append(block)
 
-        self.logit_nonl = d2.ScalarGate2d(up[-1])
+        self.logit_nonl = GlobalGate2d(up[-1])
         self.logit_conv = nn.Conv2d(sum(up[-1]), self.out_features, 1)
 
         self.n_params = 0
