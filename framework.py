@@ -2,6 +2,67 @@ import torch, os
 from utils import AvgMeter, open_file, print_dict, size_adaptive_, fmt_value
 from tqdm import tqdm
 
+def load_checkpoint(path):
+    cp = torch.load(path)
+    return cp['epoch'], cp['score'], cp['model'], cp['optim']
+
+def save_checkpoint(epoch, score, model, optim, path=None, fname=None):
+    if path is None:
+        raise ValueError("No path specified for save_checkpoint")
+
+    cp = {
+        'epoch': epoch,
+        'score': score,
+        'model': model.state_dict(),
+        'optim': optim.state_dict()
+    }
+
+    if not os.path.exists(path):
+        os.makedirs(path)
+        print("Created save directory {}".format(path))
+    else:
+        if not os.path.isdir(path):
+            fmt = "{} is not a directory"
+            msg = fmt.format(path)
+            raise IOError(msg)
+
+    fname = fname if fname else 'epoch{}.pth.tar'.format(epoch)
+    torch.save(cp, path + os.path.sep + fname)
+
+def inspect(network, loader, path, early_stop=None, criteria=[]):
+    network.eval()
+    path += os.path.sep       
+    maybe_make_dir(path)
+    
+    with tqdm(total=len(loader), dynamic_ncols=True) as progress, torch.no_grad():
+        for i, args in enumerate(loader):
+            if i == early_stop:
+                break
+
+            if torch.cuda.is_available():
+                input = args[0].cuda()      
+
+            directory = path + os.path.sep + str(i) 
+    
+            # prediction
+            prediction = network(input)
+            heatmap = torch.sigmoid(prediction)
+            heatmap = heatmap.cpu()[0, 0].numpy()
+            hm_path = directory + os.path.sep + 'heatmap.npy'                     
+            maybe_make_dir(hm_path, silent=True)          
+            np.save(hm_path, heatmap)
+                      
+            # image 
+            image = input.cpu()[0].numpy().transpose(1, 2, 0)
+            np.save(directory + os.path.sep + 'image.npy', image)
+
+            # ground truth             
+            g_truth = args[-1][0, 0].numpy()
+            np.save(directory + os.path.sep + 'g_truth.npy', g_truth)
+
+            progress.update(1) 
+
+
 def train(network, dataset, loss_fn, optimizer, epoch, early_stop=None, logger=None):
     def optimization_step(*args):
         if torch.cuda.is_available():
@@ -25,7 +86,7 @@ def train(network, dataset, loss_fn, optimizer, epoch, early_stop=None, logger=N
     with tqdm(total=len(dataset), dynamic_ncols=True) as progress:
         for i, args in enumerate(dataset):
             if i == early_stop:
-                return
+                break
 
             loss = optimization_step(*args)
 

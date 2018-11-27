@@ -7,82 +7,15 @@ from tqdm import tqdm
 
 # parent directory
 sys.path.append('../')
-import losses
+import losses, framework
 import criteria as criteria_mod
 from utils import size_adaptive_, maybe_make_dir, print_dict
-from framework import train, test, Logger
+#from framework import train, test, Logger, 
 from reg_unet import Unet, repr_to_n
 from hunet import HUnet
 
 # local directory
 import loader
-
-def load_checkpoint(path):
-    cp = torch.load(path)
-    return cp['epoch'], cp['score'], cp['model'], cp['optim']
-
-def save_checkpoint(epoch, score, model, optim, path=None, fname=None):
-    if path is None:
-        raise ValueError("No path specified for save_checkpoint")
-
-    cp = {
-        'epoch': epoch,
-        'score': score,
-        'model': model.state_dict(),
-        'optim': optim.state_dict()
-    }
-
-    if not os.path.exists(path):
-        os.makedirs(path)
-        print("Created save directory {}".format(path))
-    else:
-        if not os.path.isdir(path):
-            fmt = "{} is not a directory"
-            msg = fmt.format(path)
-            raise IOError(msg)
-    
-    fname = fname if fname else 'epoch{}.pth.tar'.format(epoch)
-    torch.save(cp, path + os.path.sep + fname)
-
-def load_model(network, path):
-    if path is not None:
-        load = torch.load(path)
-        network.load_state_dict(load)
-        print('Loaded from {}'.format(path))
-
-
-def inspect(network, loader, path, early_stop=None, criteria=[]):
-    network.eval()
-    path += os.path.sep
-    maybe_make_dir(path)
-
-    with tqdm(total=len(loader), dynamic_ncols=True) as progress, torch.no_grad():
-        for i, args in enumerate(loader):
-            if i == early_stop:
-                break
-
-            if torch.cuda.is_available():
-                input = args[0].cuda()
-
-            directory = path + os.path.sep + str(i)
-
-            # prediction
-            prediction = network(input)
-            heatmap = torch.sigmoid(prediction)
-            heatmap = heatmap.cpu()[0, 0].numpy()
-            hm_path = directory + os.path.sep + 'heatmap.npy'
-            maybe_make_dir(hm_path, silent=True)
-            np.save(hm_path, heatmap)
-
-            # image 
-            image = input.cpu()[0].numpy().transpose(1, 2, 0)
-            np.save(directory + os.path.sep + 'image.npy', image)
-
-            # ground truth 
-            g_truth = args[-1][0, 0].numpy()
-            np.save(directory + os.path.sep + 'g_truth.npy', g_truth)
-
-            progress.update(1)
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='PyTorch 2d segmentation')
@@ -125,7 +58,7 @@ if __name__ == '__main__':
         print('creating artifacts directory', args.artifacts)
         os.makedirs(args.artifacts)
 
-    with Logger(args.artifacts + '/log') as logger:
+    with framework.Logger(args.artifacts + '/log') as logger:
         if args.action == 'inspect' and args.batch_size != 1:
             args.batch_size = 1
             print("Setting --batch-size to 1 for inspection")
@@ -225,7 +158,9 @@ if __name__ == '__main__':
             )
 
         if args.load:
-            start_epoch, best_score, model_dict, optim_dict = load_checkpoint(args.load)
+            checkpoint = framework.load_checkpoint(args.load)
+            start_epoch, best_score, model_dict, optim_dict = checkpoint
+
             network.load_state_dict(model_dict)
             optim.load_state_dict(optim_dict)
             fmt = 'Starting at epoch {}, best score {}. Loaded from {}'
@@ -239,14 +174,14 @@ if __name__ == '__main__':
             start_epoch = 0
 
         if args.action == 'inspect':
-            inspect(
+            framework.inspect(
                 network, val_loader, args.artifacts,
                 criteria=criteria, early_stop=args.early_stop
             )
         elif args.action == 'evaluate':
 #            prec_rec = PrecRec(masked=False, n_thresholds=100)
             callbacks = [iou]
-            test(
+            framework.test(
                 network, val_loader, criteria, logger=logger,
                 callbacks=callbacks, early_stop=args.early_stop
             )
@@ -263,14 +198,14 @@ if __name__ == '__main__':
             )
 
             for epoch in range(start_epoch, args.epochs):
-                train(
+                framework.train(
                     network, train_loader, loss_fn, optim, epoch,
                     early_stop=args.early_stop, logger=logger
                 )
 
                 iou = criteria_mod.ISICIoU(n_thresholds=100)
                 callbacks = [iou]
-                score = test(
+                score = framework.test(
                     network, val_loader, criteria, callbacks=callbacks,
                     early_stop=args.early_stop, logger=logger
                 )
@@ -279,14 +214,14 @@ if __name__ == '__main__':
                 print(iou_msg)
                 logger.add_msg(iou_msg)
                 scheduler.step(score)
-                save_checkpoint(
+                framework.save_checkpoint(
                     epoch, score, network, optim, path=args.artifacts
                 )
 
                 if score > best_score:
                     best_score = score 
                     fname = 'model_best_{:.2f}.pth.tar'.format(best_score)
-                    save_checkpoint(
+                    framework.save_checkpoint(
                         epoch, best_score, network, optim,
                         path=args.artifacts, fname=fname
                     )
