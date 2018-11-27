@@ -63,16 +63,22 @@ def inspect(network, loader, path, early_stop=None, criteria=[]):
             progress.update(1) 
 
 
-def train(network, dataset, loss_fn, optimizer, epoch, early_stop=None, logger=None):
-    def optimization_step(*args):
+def train(network, dataset, loss_fn, optimizer, epoch,
+          early_stop=None, logger=None, batch_multiplier=1):
+
+    def optimization_step(i, *args):
+        if i % batch_multiplier == 0:
+            optimizer.zero_grad()
+
         if torch.cuda.is_available():
             args = [a.cuda() for a in args]
 
         prediction = network(args[0])
-        optimizer.zero_grad()
         loss = loss_fn(prediction, *args[1:])
         loss.backward()
-        optimizer.step()
+
+        if (i+1) % batch_multiplier == 0:
+            optimizer.step()
 
         return loss
 
@@ -88,7 +94,7 @@ def train(network, dataset, loss_fn, optimizer, epoch, early_stop=None, logger=N
             if i == early_stop:
                 break
 
-            loss = optimization_step(*args)
+            loss = optimization_step(i, *args)
 
             loss_meter.update(loss.item())
 

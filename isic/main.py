@@ -5,52 +5,57 @@ import numpy as np
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
+# local directory
+import loader
+
 # parent directory
 sys.path.append('../')
 import losses, framework
 import criteria as criteria_mod
 from utils import size_adaptive_, maybe_make_dir, print_dict
-#from framework import train, test, Logger, 
 from reg_unet import Unet, repr_to_n
 from hunet import HUnet
+from scheduler import MultiplicativeScheduler
 
-# local directory
-import loader
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='PyTorch 2d segmentation')
+    # paths
     parser.add_argument('data_path', metavar='DIR', help='path to the dataset')
     parser.add_argument('artifacts', metavar='DIR',
                         help='path to store artifacts')
 
+    # behavior choice
     parser.add_argument('model', choices=['harmonic', 'baseline'])
     parser.add_argument('action', choices=['train', 'evaluate', 'inspect'])
 
-    parser.add_argument('-tot', '--test-on-train', action='store_true',
-                        help='Run evaluation and inspection on training set')
-    parser.add_argument('--bloat', type=int, default=50, metavar='N',
-                        help='Process N times the dataset per epoch')
+    # framework control
     parser.add_argument('--load', metavar='FILE', default=None, type=str,
                         help='load an existing model')
     parser.add_argument('-j', '--workers', metavar='N', default=1, type=int,
                         help='number of data loader workers')
+    parser.add_argument('-nj', '--no-jit', action='store_true',
+                        help='disable jit compilation for the model')
+    parser.add_argument('--optimize', action='store_true',
+                        help='run optimization pass in jit')
+
+    # learning paramters
     parser.add_argument('-b', '--batch-size', metavar='N', default=1, type=int,
                         help='batch size')
+    parser.add_argument('-bm', '--batch-multiplier', metavar='N', default=1, type=int,
+                        help='number of epochs to train for')
     parser.add_argument('--l2', metavar='F', default=1e-5, type=float,
                         help='l2 regularization strength')
     parser.add_argument('--lr', metavar='F', default=1e-4, type=float,
                         help='learning rate (ADAM)')
     parser.add_argument('--epochs', metavar='N', default=10, type=int,
                         help='number of epochs to train for')
+
+    # other
     parser.add_argument('-s', '--early_stop', default=None, type=int,
                         help='stop early after n batches')
-    parser.add_argument('--restart-checkpoint', action='store_true',
-                        help=('consider a loaded checkpoint to be epoch '
-                        '0 with 0 best performance'))
-    parser.add_argument('-nj', '--no-jit', action='store_true',
-                        help='disable jit compilation for the model')
-    parser.add_argument('--optimize', action='store_true',
-                        help='run optimization pass in jit')
+    parser.add_argument('-tot', '--test-on-train', action='store_true',
+                        help='Run evaluation and inspection on training set')
 
     args = parser.parse_args()
     
@@ -117,7 +122,7 @@ if __name__ == '__main__':
             num_workers=args.workers
         )
 
-        down = [(8, 8, 8, 5), (8, 8, 8, 5), (5, 5, 5, 5), (5, 5, 5, 5)]
+        down = [(5, 5, 5, 5), (5, 5, 5, 5), (5, 5, 5, 5), (5, 5, 5, 5)]
         up = [(5, 5, 5, 5), (5, 5, 5, 5), (5, 5, 5, 5)]
         if args.model == 'baseline':
             down = [repr_to_n(d) for d in down]
@@ -179,28 +184,25 @@ if __name__ == '__main__':
                 criteria=criteria, early_stop=args.early_stop
             )
         elif args.action == 'evaluate':
-#            prec_rec = PrecRec(masked=False, n_thresholds=100)
             callbacks = [iou]
             framework.test(
                 network, val_loader, criteria, logger=logger,
                 callbacks=callbacks, early_stop=args.early_stop
             )
-#            f1, f1_thres = prec_rec.best_f1()
-#            print('F1', f1, 'at', f1_thres)
-#            iou, iou_thres = prec_rec.best_iou()
-#            print('IoU', iou, 'at', iou_thres)
             best_iou, iou_thres = iou.best_iou()
             print('IoU', best_iou, 'at', iou_thres)
 
         elif args.action == 'train':
-            scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
-                optim, 'min', patience=8, verbose=True, cooldown=0
+            scheduler = MultiplicativeScheduler(
+                optim, 'min', patience=5, verbose=True, cooldown=0,
+                cmd_args=args, factor=0.2
             )
 
             for epoch in range(start_epoch, args.epochs):
                 framework.train(
                     network, train_loader, loss_fn, optim, epoch,
-                    early_stop=args.early_stop, logger=logger
+                    early_stop=args.early_stop, logger=logger,
+                    batch_multiplier=args.batch_multiplier
                 )
 
                 iou = criteria_mod.ISICIoU(n_thresholds=100)
