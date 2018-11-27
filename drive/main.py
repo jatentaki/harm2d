@@ -4,6 +4,7 @@ import torchvision.transforms as T
 import numpy as np
 from torch.utils.data import DataLoader
 from tqdm import tqdm
+import harmonic
 
 # parent directory
 sys.path.append('../')
@@ -25,10 +26,16 @@ if __name__ == '__main__':
     parser.add_argument('model', choices=['harmonic', 'baseline'])
     parser.add_argument('action', choices=['train', 'evaluate', 'inspect'])
 
+    parser.add_argument('-nj', '--no-jit', action='store_true',
+                        help='disable jit compilation for the model')
+    parser.add_argument('--optimize', action='store_true',
+                        help='run optimization pass in jit')
     parser.add_argument('-tot', '--test-on-train', action='store_true',
                         help='Run evaluation and inspection on training set')
     parser.add_argument('--bloat', type=int, default=50, metavar='N',
                         help='Process N times the dataset per epoch')
+    parser.add_argument('--cut', metavar='N', default=None, type=int,
+                        help='restrict training set size by N examples')
     parser.add_argument('--load', metavar='FILE', default=None, type=str,
                         help='load an existing model')
     parser.add_argument('-j', '--workers', metavar='N', default=1, type=int,
@@ -43,12 +50,9 @@ if __name__ == '__main__':
                         help='number of epochs to train for')
     parser.add_argument('-s', '--early_stop', default=None, type=int,
                         help='stop early after n batches')
-    parser.add_argument('--restart-checkpoint', action='store_true',
-                        help='consider a loaded checkpoint to be epoch 0 with 0' + \
-                        'best performance')
 
     args = parser.parse_args()
-    
+
     if not os.path.isdir(args.artifacts):
         print('creating artifacts directory', args.artifacts)
         os.makedirs(args.artifacts)
@@ -61,6 +65,9 @@ if __name__ == '__main__':
         if args.action != 'train' and args.epochs is not None:
             print("Ignoring --epochs outside of training mode")
 
+        if args.no_jit and args.optimize:
+            print("Ignoring --optimize in --no-jit setting")
+
         logger.add_dict(vars(args))
 
         transform = T.Compose([
@@ -71,15 +78,15 @@ if __name__ == '__main__':
         warnings.simplefilter("ignore")
         logger.add_msg('Ignoring warnings')
 
-        if args.model == 'harmonic':
+        if args.model == 'baseline':
             train_global_transform = loader.RandomRotate()
         else:
             train_global_transform = None
 
         train_data = loader.DriveDataset(
-            args.data_path, training=True, img_transform=transform,
-            mask_transform=transform, label_transform=transform,
-            global_transform = train_global_transform, bloat=args.bloat
+            args.data_path, training=True, bloat=args.bloat, cut=args.cut,
+            img_transform=transform, mask_transform=transform,
+            label_transform=transform, global_transform = train_global_transform
         )
         train_loader = DataLoader(
             train_data, batch_size=args.batch_size, shuffle=True, num_workers=args.workers
@@ -89,7 +96,6 @@ if __name__ == '__main__':
             val_data = loader.DriveDataset(
                 args.data_path, training=True, img_transform=transform,
                 mask_transform=transform, label_transform=transform,
-                bloat=1
             )
         else:
             val_data = loader.DriveDataset(
@@ -104,13 +110,11 @@ if __name__ == '__main__':
         if args.model == 'baseline':
             down = [2 * (10 + 7 + 7), 2 * 3 * 7, 2 * 3 * 5]
             up = [2 * 3 * 7, 20]
-            network = Unet(
-                up=up, down=down, in_features=3
-            )
+            network = Unet(up=up, down=down, in_features=3)
         elif args.model == 'harmonic':
             down=[(10, 7, 7), (7, 7, 7), (5, 5, 5)] 
             up=[(7, 7, 7), (10, )] 
-            network = HUnet(in_features=3, down=down, up=up)
+            network = HUnet(in_features=3, down=down, up=up, gate=harmonic.d2.ScalarGate2d)
 
         cuda = torch.cuda.is_available()
 
@@ -131,9 +135,11 @@ if __name__ == '__main__':
 
         criteria = [loss_fn]
 
-#        if args.model == 'baseline':
-#            example = next(iter(train_loader))[0].cuda()
-#            network = torch.jit.trace(network, example)
+        if not args.no_jit:
+            example = next(iter(train_loader))[0][0:1].cuda()
+            network = torch.jit.trace(
+                network, example, check_trace=True, optimize=args.optimize
+            )
 
         if args.load:
             checkpoint = framework.load_checkpoint(args.load)

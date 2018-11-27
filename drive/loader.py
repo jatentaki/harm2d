@@ -1,6 +1,7 @@
 import torch, os, imageio, re, random
 import torchvision as tv
 import torchvision.transforms as T
+from itertools import cycle, islice
 from PIL import Image
 
 class RandomRotate:
@@ -21,7 +22,7 @@ class RandomRotate:
 class DriveDataset:
     def __init__(self, path, training=True, img_transform=T.ToTensor(),
                  mask_transform=T.ToTensor(), label_transform=T.ToTensor(),
-                 global_transform=None, bloat=1):
+                 global_transform=None, bloat=None, cut=None):
         self.training = training
 
         self.subdir = 'training' if training else 'test'
@@ -49,7 +50,13 @@ class DriveDataset:
 
                 self.samples.append((img, mask, label))
 
-        self.samples = self.samples * bloat
+        self.samples = self.samples[cut:]
+
+        if bloat is not None:
+            cycled = cycle(self.samples)
+            self.samples = list(islice(cycled, bloat))
+
+        print(f'Dataset size (post bloat and cut): {len(self.samples)}')
 
 
     def fetch_label(self, id):

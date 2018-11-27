@@ -157,7 +157,7 @@ class HUnet(nn.Module):
             )
             self.path_up.append(block)
 
-        self.logit_nonl = GlobalGate2d(up[-1])
+        self.logit_nonl = gate(up[-1])
         self.logit_conv = nn.Conv2d(sum(up[-1]), self.out_features, 1)
 
         self.n_params = 0
