@@ -112,6 +112,8 @@ if __name__ == '__main__':
                         '0 with 0 best performance'))
     parser.add_argument('-nj', '--no-jit', action='store_true',
                         help='disable jit compilation for the model')
+    parser.add_argument('--optimize', action='store_true',
+                        help='run optimization pass in jit')
 
     args = parser.parse_args()
     
@@ -126,6 +128,9 @@ if __name__ == '__main__':
 
         if args.action != 'train' and args.epochs is not None:
             print("Ignoring --epochs outside of training mode")
+
+        if args.no_jit and args.optimize:
+            print("Ignoring --optimize in --no-jit setting")
 
         logger.add_dict(vars(args))
 
@@ -175,7 +180,7 @@ if __name__ == '__main__':
             num_workers=args.workers
         )
 
-        down = [(5, 5, 5, 5), (5, 5, 5, 5), (5, 5, 5, 5), (5, 5, 5, 5)]
+        down = [(8, 8, 8, 5), (8, 8, 8, 5), (5, 5, 5, 5), (5, 5, 5, 5)]
         up = [(5, 5, 5, 5), (5, 5, 5, 5), (5, 5, 5, 5)]
         if args.model == 'baseline':
             down = [repr_to_n(d) for d in down]
@@ -211,7 +216,9 @@ if __name__ == '__main__':
 
         if not args.no_jit:
             example = next(iter(train_loader))[0][0:1].cuda()
-            network = torch.jit.trace(network, example, check_trace=False, optimize=False)
+            network = torch.jit.trace(
+                network, example, check_trace=True, optimize=args.optimize
+            )
 
         if args.load:
             start_epoch, best_score, model_dict, optim_dict = load_checkpoint(args.load)
@@ -234,7 +241,6 @@ if __name__ == '__main__':
             )
         elif args.action == 'evaluate':
 #            prec_rec = PrecRec(masked=False, n_thresholds=100)
-            iou = criteria_mod.ISICIoU(n_thresholds=100)
             callbacks = [iou]
             test(
                 network, val_loader, criteria, logger=logger,
@@ -258,10 +264,16 @@ if __name__ == '__main__':
                     early_stop=args.early_stop, logger=logger
                 )
 
+                iou = criteria_mod.ISICIoU(n_thresholds=100)
+                callbacks = [iou]
                 score = test(
-                    network, val_loader, criteria,
+                    network, val_loader, criteria, callbacks=callbacks,
                     early_stop=args.early_stop, logger=logger
                 )
+                best_iou, iou_thres = iou.best_iou()
+                iou_msg = f'best iou {best_iou} at {iou_thres}'
+                print(iou_msg)
+                logger.add_msg(iou_msg)
                 scheduler.step(score)
                 save_checkpoint(
                     epoch, score, network, optim, path=args.artifacts

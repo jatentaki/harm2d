@@ -34,7 +34,7 @@ class BNConv2d(nn.Module):
 
 class UnetDownBlock(nn.Module):
     def __init__(self, in_repr, out_repr, size=5, radius=None, name=None,
-                 first_norm=True):
+                 first_norm=True, gate=d2.ScalarGate2d):
         super(UnetDownBlock, self).__init__()
 
         self.name = name
@@ -48,10 +48,9 @@ class UnetDownBlock(nn.Module):
         else:
             self.conv1 = d2.HConv2d(in_repr, out_repr, size=size, radius=radius)
 
-        self.nonl1 = GlobalGate2d(out_repr)
-
+        self.nonl1 = gate(out_repr)
         self.conv2 = BNConv2d(out_repr, out_repr, size, radius=radius)
-        self.nonl2 = GlobalGate2d(out_repr)
+        self.nonl2 = gate(out_repr)
     
 
     @localized
@@ -75,7 +74,7 @@ class UnetDownBlock(nn.Module):
 
 class UnetUpBlock(nn.Module):
     def __init__(self, bottom_repr, horizontal_repr, out_repr,
-                 size=5, radius=None, name=None):
+                 size=5, radius=None, name=None, gate=d2.ScalarGate2d):
 
         super(UnetUpBlock, self).__init__()
 
@@ -85,10 +84,10 @@ class UnetUpBlock(nn.Module):
         self.cat_repr = harmonic.cat_repr(bottom_repr, horizontal_repr)
         self.out_repr = out_repr
 
-        self.nonl1 = GlobalGate2d(self.cat_repr)
+        self.nonl1 = gate(self.cat_repr)
         self.conv1 = BNConv2d(self.cat_repr, self.cat_repr, size, radius=radius)
 
-        self.nonl2 = GlobalGate2d(self.cat_repr)
+        self.nonl2 = gate(self.cat_repr)
         self.conv2 = BNConv2d(self.cat_repr, self.out_repr, size, radius=radius)
 
 
@@ -125,7 +124,8 @@ hunet_default_up= [
 @localized_module
 class HUnet(nn.Module):
     def __init__(self, in_features=1, out_features=1, up=hunet_default_up,
-                 down=hunet_default_down, size=5, radius=None):
+                 down=hunet_default_down, size=5, radius=None,
+                 gate=d2.ScalarGate2d):
         super(HUnet, self).__init__()
 
         if not len(down) == len(up) + 1:
@@ -143,7 +143,7 @@ class HUnet(nn.Module):
 
             block = UnetDownBlock(
                 d_in, d_out, size=size, radius=radius, name='down_{}'.format(i),
-                first_norm=first_norm
+                first_norm=first_norm, gate=gate
             )
             self.path_down.append(block)
 
@@ -153,7 +153,7 @@ class HUnet(nn.Module):
         for i, (d_bot, d_hor, d_out) in enumerate(zip(bot_dims, hor_dims, up)):
             block = UnetUpBlock(
                 d_bot, d_hor, d_out, size=size, radius=radius,
-                name='up_{}'.format(i)
+                name='up_{}'.format(i), gate=gate
             )
             self.path_up.append(block)
 
