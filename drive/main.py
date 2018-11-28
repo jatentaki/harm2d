@@ -12,7 +12,7 @@ import framework
 from losses import BCE
 from utils import size_adaptive_, maybe_make_dir, print_dict
 from criteria import PrecRec
-from reg_unet import Unet
+from reg_unet import Unet, repr_to_n
 from hunet import HUnet
 
 # `drive` directory
@@ -78,15 +78,15 @@ if __name__ == '__main__':
         warnings.simplefilter("ignore")
         logger.add_msg('Ignoring warnings')
 
-        if args.model == 'baseline':
+        if args.model == 'harmonic':
             train_global_transform = loader.RandomRotate()
         else:
             train_global_transform = None
 
         train_data = loader.DriveDataset(
-            args.data_path, training=True, bloat=args.bloat, cut=args.cut,
+            args.data_path, training=True, bloat=args.bloat, from_=args.cut,
             img_transform=transform, mask_transform=transform,
-            label_transform=transform, global_transform = train_global_transform
+            label_transform=transform, global_transform=train_global_transform
         )
         train_loader = DataLoader(
             train_data, batch_size=args.batch_size, shuffle=True, num_workers=args.workers
@@ -107,14 +107,16 @@ if __name__ == '__main__':
             val_data, batch_size=args.batch_size, shuffle=False, num_workers=args.workers
         )
 
-        if args.model == 'baseline':
-            down = [2 * (10 + 7 + 7), 2 * 3 * 7, 2 * 3 * 5]
-            up = [2 * 3 * 7, 20]
+        down = [(2, 5, 2), (5, 7, 5), (10, 14, 10)]
+        up = [(5, 7, 5), (2, 5, 2)]
+        if args.model == 'harmonic':
+            network = HUnet(
+                in_features=3, down=down, up=up, radius=2, gate=harmonic.d2.ScalarGate2d
+            )
+        elif args.model == 'baseline':
+            down = [repr_to_n(d) for d in down]
+            up = [repr_to_n(d) for d in up]
             network = Unet(up=up, down=down, in_features=3)
-        elif args.model == 'harmonic':
-            down=[(10, 7, 7), (7, 7, 7), (5, 5, 5)] 
-            up=[(7, 7, 7), (10, )] 
-            network = HUnet(in_features=3, down=down, up=up, gate=harmonic.d2.ScalarGate2d)
 
         cuda = torch.cuda.is_available()
 

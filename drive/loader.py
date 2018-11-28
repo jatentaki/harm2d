@@ -22,7 +22,7 @@ class RandomRotate:
 class DriveDataset:
     def __init__(self, path, training=True, img_transform=T.ToTensor(),
                  mask_transform=T.ToTensor(), label_transform=T.ToTensor(),
-                 global_transform=None, bloat=None, cut=None):
+                 global_transform=None, bloat=None, from_=None, to=None):
         self.training = training
 
         self.subdir = 'training' if training else 'test'
@@ -38,7 +38,7 @@ class DriveDataset:
         regex = re.compile('^(\d+)_' + self.subdir + '\.tif$')
 
         self.samples = []
-        for file in os.listdir(self.img_p):
+        for file in sorted(os.listdir(self.img_p)):
             m = regex.match(file)
             if m:
                 id = int(m.group(1))
@@ -50,7 +50,7 @@ class DriveDataset:
 
                 self.samples.append((img, mask, label))
 
-        self.samples = self.samples[cut:]
+        self.samples = self.samples[from_:to]
 
         if bloat is not None:
             cycled = cycle(self.samples)
