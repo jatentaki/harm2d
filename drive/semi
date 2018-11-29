@@ -1,0 +1,2 @@
+#!/usr/bin/env bash
+python semi.py /cvlabdata2/cvlab/datasets_tyszkiewicz/drive artifacts_semi train -b 3 --bloat 750 --epoch 25 --lr 1e-2

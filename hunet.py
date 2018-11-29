@@ -111,21 +111,11 @@ class UnetUpBlock(nn.Module):
         return y
 
 
-hunet_default_down = [
-    (8, 6, 6),
-    (12, 4, 2),
-    (8, 2, 2)
-]
-hunet_default_up= [
-    (12, 4, 2),
-    (20, )
-]
-
 @localized_module
 class HUnet(nn.Module):
-    def __init__(self, in_features=1, out_features=1, up=hunet_default_up,
-                 down=hunet_default_down, size=5, radius=None,
-                 gate=d2.ScalarGate2d):
+    def __init__(self, in_features=1, out_features=(1, ),
+                 up=None, down=None,
+                 size=5, radius=None, gate=d2.ScalarGate2d):
         super(HUnet, self).__init__()
 
         if not len(down) == len(up) + 1:
@@ -157,8 +147,14 @@ class HUnet(nn.Module):
             )
             self.path_up.append(block)
 
+
         self.logit_nonl = gate(up[-1])
-        self.logit_conv = nn.Conv2d(sum(up[-1]), self.out_features, 1)
+        self.logit_conv = d2.HConv2d(
+            up[-1], self.out_features, size=size, radius=radius
+        )
+        self.logit_bias = nn.Parameter(
+            torch.full((1, sum(self.out_features), 1, 1), -1.)
+        )
 
         self.n_params = 0
         for param in self.parameters():
@@ -166,16 +162,16 @@ class HUnet(nn.Module):
 
 
     @dimchecked
-    def forward(self, inp: ['b', 'fi', 'hi', 'wi']) -> ['b', 'fo', 'ho', 'wo']:
-        if inp.size(1) != self.in_features:
+    def forward_vector(self, x: ['b', 'fi', 'hi', 'wi']) -> [2, 'b', 'fo', 'ho', 'wo']:
+        if x.size(1) != self.in_features:
             fmt = "Expected {} feature channels in input, got {}"
-            msg = fmt.format(self.in_features, inp.size(1))
+            msg = fmt.format(self.in_features, x.size(1))
             raise ValueError(msg)
 
         if SAVE_NPY:
-            np.save('img.npy', inp.detach().cpu().numpy())
+            np.save('img.npy', x.detach().cpu().numpy())
 
-        features_gated = harmonic.cmplx.from_real(inp)
+        features_gated = harmonic.cmplx.from_real(x)
         features_down = []
         for i, layer in enumerate(self.path_down):
             if i != 0:
@@ -197,11 +193,18 @@ class HUnet(nn.Module):
             f_b = layer(f_b, f_h)
 
         f_gated = self.logit_nonl(f_b)
-        magnitudes = harmonic.cmplx.magnitude(f_gated)
-        return self.logit_conv(magnitudes)
+        return self.logit_conv(f_gated)
+
+
+    @dimchecked
+    def forward(self, x: ['b', 'fi', 'hi', 'wi']) -> ['b', 'fo', 'ho', 'wo']:
+        vf = self.forward_vector(x)
+        return harmonic.cmplx.magnitude(vf) + self.logit_bias
+
 
     def l2_params(self):
         return [p for n, p in self.named_parameters() if 'bias' not in n]
+
 
     def nr_params(self):
         return [p for n, p in self.named_parameters() if 'bias' in n]
