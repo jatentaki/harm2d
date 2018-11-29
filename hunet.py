@@ -20,21 +20,21 @@ def size_is_pow2(t):
 
 
 class BNConv2d(nn.Module):
-    def __init__(self, repr_in, repr_out, size, radius=None):
+    def __init__(self, repr_in, repr_out, size, radius=None, norm=d2.InstanceNorm2d):
         super(BNConv2d, self).__init__()
 
-        self.bn = d2.InstanceNorm2d(repr_in)
+        self.norm = norm(repr_in)
         self.conv = d2.HConv2d(repr_in, repr_out, size, radius=radius)
 
     def forward(self, x):
-        y = self.bn(x)
+        y = self.norm(x)
         y = self.conv(y)
 
         return y
 
 class UnetDownBlock(nn.Module):
     def __init__(self, in_repr, out_repr, size=5, radius=None, name=None,
-                 first_norm=True, gate=d2.ScalarGate2d):
+                 first_norm=True, gate=d2.ScalarGate2d, norm=d2.InstanceNorm2d):
         super(UnetDownBlock, self).__init__()
 
         self.name = name
@@ -44,12 +44,12 @@ class UnetDownBlock(nn.Module):
         
         # we don't want to normalize input if its the very first DownBlock
         if first_norm: 
-            self.conv1 = BNConv2d(in_repr, out_repr, size, radius=radius)
+            self.conv1 = BNConv2d(in_repr, out_repr, size, radius=radius, norm=norm)
         else:
             self.conv1 = d2.HConv2d(in_repr, out_repr, size=size, radius=radius)
 
         self.nonl1 = gate(out_repr)
-        self.conv2 = BNConv2d(out_repr, out_repr, size, radius=radius)
+        self.conv2 = BNConv2d(out_repr, out_repr, size, radius=radius, norm=norm)
         self.nonl2 = gate(out_repr)
     
 
@@ -74,7 +74,8 @@ class UnetDownBlock(nn.Module):
 
 class UnetUpBlock(nn.Module):
     def __init__(self, bottom_repr, horizontal_repr, out_repr,
-                 size=5, radius=None, name=None, gate=d2.ScalarGate2d):
+                 size=5, radius=None, name=None,
+                 gate=d2.ScalarGate2d, norm=d2.InstanceNorm2d):
 
         super(UnetUpBlock, self).__init__()
 
@@ -85,10 +86,14 @@ class UnetUpBlock(nn.Module):
         self.out_repr = out_repr
 
         self.nonl1 = gate(self.cat_repr)
-        self.conv1 = BNConv2d(self.cat_repr, self.cat_repr, size, radius=radius)
+        self.conv1 = BNConv2d(
+            self.cat_repr, self.cat_repr, size, radius=radius, norm=norm
+        )
 
         self.nonl2 = gate(self.cat_repr)
-        self.conv2 = BNConv2d(self.cat_repr, self.out_repr, size, radius=radius)
+        self.conv2 = BNConv2d(
+            self.cat_repr, self.out_repr, size, radius=radius, norm=norm
+        )
 
 
     @localized
@@ -111,21 +116,12 @@ class UnetUpBlock(nn.Module):
         return y
 
 
-hunet_default_down = [
-    (8, 6, 6),
-    (12, 4, 2),
-    (8, 2, 2)
-]
-hunet_default_up= [
-    (12, 4, 2),
-    (20, )
-]
-
 @localized_module
 class HUnet(nn.Module):
-    def __init__(self, in_features=1, out_features=1, up=hunet_default_up,
-                 down=hunet_default_down, size=5, radius=None,
-                 gate=d2.ScalarGate2d):
+    def __init__(self, in_features=1, out_features=1, up=None, down=None,
+                 size=5, radius=None, gate=d2.ScalarGate2d,
+                 norm=d2.InstanceNorm2d):
+
         super(HUnet, self).__init__()
 
         if not len(down) == len(up) + 1:
@@ -143,7 +139,7 @@ class HUnet(nn.Module):
 
             block = UnetDownBlock(
                 d_in, d_out, size=size, radius=radius, name='down_{}'.format(i),
-                first_norm=first_norm, gate=gate
+                first_norm=first_norm, gate=gate, norm=norm
             )
             self.path_down.append(block)
 
@@ -153,7 +149,7 @@ class HUnet(nn.Module):
         for i, (d_bot, d_hor, d_out) in enumerate(zip(bot_dims, hor_dims, up)):
             block = UnetUpBlock(
                 d_bot, d_hor, d_out, size=size, radius=radius,
-                name='up_{}'.format(i), gate=gate
+                name='up_{}'.format(i), gate=gate, norm=norm
             )
             self.path_up.append(block)
 

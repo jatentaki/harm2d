@@ -78,10 +78,14 @@ if __name__ == '__main__':
         warnings.simplefilter("ignore")
         logger.add_msg('Ignoring warnings')
 
-        if args.model == 'harmonic':
+        if args.model == 'baseline':
             train_global_transform = loader.RandomRotate()
         else:
             train_global_transform = None
+
+        augumentation = f'augumentation: {type(train_global_transform)}'
+        print(augumentation)
+        logger.add_msg(augumentation)
 
         train_data = loader.DriveDataset(
             args.data_path, training=True, bloat=args.bloat, from_=args.cut,
@@ -111,7 +115,8 @@ if __name__ == '__main__':
         up = [(5, 7, 5), (2, 5, 2)]
         if args.model == 'harmonic':
             network = HUnet(
-                in_features=3, down=down, up=up, radius=2, gate=harmonic.d2.ScalarGate2d
+                in_features=3, down=down, up=up, radius=2, gate=harmonic.d2.ScalarGate2d,
+                norm=harmonic.d2.BatchNorm2d
             )
         elif args.model == 'baseline':
             down = [repr_to_n(d) for d in down]
