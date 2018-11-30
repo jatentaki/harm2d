@@ -1,0 +1,22 @@
+#!/usr/bin/env bash
+
+DATASET=/cvlabdata2/cvlab/datasets_tyszkiewicz/drive
+EPOCHS=25
+BLOAT=750
+B=3
+
+for cut in 0 10 15 18; do
+    ARTIFACTS=artifacts_${cut}
+
+    python main.py $DATASET ${ARTIFACTS}_harmonic_rotate harmonic train -b $B \
+    --bloat $BLOAT --epochs $EPOCHS --cut $cut --optimize --rot
+
+    python main.py $DATASET ${ARTIFACTS}_harmonic_no_rot harmonic train -b $B \
+    --bloat $BLOAT --epochs $EPOCHS --cut $cut --optimize
+
+    python main.py $DATASET ${ARTIFACTS}_baseline_rotate baseline train -b $B \
+    --bloat $BLOAT --epochs $EPOCHS --cut $cut --optimize --rot
+
+    python main.py $DATASET ${ARTIFACTS}_baseline_no_rot baseline train -b $B \
+    --bloat $BLOAT --epochs $EPOCHS --cut $cut --optimize
+done

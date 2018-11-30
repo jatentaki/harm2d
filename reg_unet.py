@@ -30,10 +30,10 @@ class AttentionGate(nn.Module):
 
 
 class NormalizedConv2(nn.Module):
-    def __init__(self, in_, out_, size=5, momentum=0.1, **kwargs):
+    def __init__(self, in_, out_, size=5, **kwargs):
         super(NormalizedConv2, self).__init__()
 
-        self.normalization = nn.BatchNorm2d(in_, momentum=momentum)
+        self.normalization = nn.BatchNorm2d(in_, track_running_stats=False)
         self.conv = nn.Conv2d(
             in_, out_, size, bias=True, **kwargs
         )
@@ -47,13 +47,17 @@ class NormalizedConv2(nn.Module):
 
 @localized_module
 class UnetDownBlock(nn.Module):
-    def __init__(self, in_, out_, size=5, **kwargs):
+    def __init__(self, in_, out_, size=5, first_norm=True, **kwargs):
         super(UnetDownBlock, self).__init__()
 
         self.in_ = in_
         self.out_ = out_
         
-        self.conv1 = NormalizedConv2(in_, out_, size=size, **kwargs)
+        if first_norm:
+            self.conv1 = NormalizedConv2(in_, out_, size=size, **kwargs)
+        else:
+            self.conv1 = nn.Conv2d(in_, out_, size, **kwargs)
+
         self.nonl1 = AttentionGate(out_)
 
         self.conv2 = NormalizedConv2(out_, out_, size=size, **kwargs)
@@ -123,7 +127,11 @@ class Unet(nn.Module):
         down_dims = [in_features] + down
         self.path_down = nn.ModuleList()
         for i, (d_in, d_out) in enumerate(zip(down_dims[:-1], down_dims[1:])):
-            block = UnetDownBlock(d_in, d_out, name='down_{}'.format(i))
+            first_norm = i != 0
+
+            block = UnetDownBlock(
+                d_in, d_out, name='down_{}'.format(i), first_norm=first_norm
+            )
             self.path_down.append(block)
 
         bot_dims = [down[-1]] + up
@@ -133,8 +141,12 @@ class Unet(nn.Module):
             block = UnetUpBlock(d_bot, d_hor, d_out, name='up_{}'.format(i))
             self.path_up.append(block)
 
-        self.logit_nonl = AttentionGate(self.up[-1])
-        self.logit_conv = nn.Conv2d(self.up[-1], self.out_features, 1)
+        self.logit_nonl = AttentionGate(up[-1])
+        self.logit_conv = nn.Conv2d(up[-1], self.out_features, 1)
+
+        self.n_params = 0
+        for param in self.parameters():
+            self.n_params += param.numel()
 
 
     def forward(self, inp):

@@ -28,6 +28,8 @@ if __name__ == '__main__':
 
     parser.add_argument('-nj', '--no-jit', action='store_true',
                         help='disable jit compilation for the model')
+    parser.add_argument('--rot', action='store_true',
+                        help='augument input by rotations')
     parser.add_argument('--optimize', action='store_true',
                         help='run optimization pass in jit')
     parser.add_argument('-tot', '--test-on-train', action='store_true',
@@ -78,7 +80,7 @@ if __name__ == '__main__':
         warnings.simplefilter("ignore")
         logger.add_msg('Ignoring warnings')
 
-        if args.model == 'baseline':
+        if args.rot:
             train_global_transform = loader.RandomRotate()
         else:
             train_global_transform = None
@@ -158,6 +160,12 @@ if __name__ == '__main__':
             start_epoch += 1 # skip to the next after loaded
             msg = fmt.format(start_epoch, best_score, args.load)
             print(msg)
+            for module in network.modules():
+                if hasattr(module, 'relax'):
+                    module.relax()
+                    print(f'relaxing {repr(module)}')
+
+            print(repr(network))
 
         if not args.load:
             print('Set start epoch and best score to 0')
