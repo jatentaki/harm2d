@@ -113,8 +113,8 @@ if __name__ == '__main__':
             val_data, batch_size=args.batch_size, shuffle=False, num_workers=args.workers
         )
 
-        down = [(2, 5, 2), (5, 7, 5), (10, 14, 10)]
-        up = [(5, 7, 5), (2, 5, 2)]
+        down = [(2, 3, 2), (4, 5, 4), (8, 10, 8)]
+        up = [(4, 5, 4), (2, 3, 2)]
         if args.model == 'harmonic':
             network = HUnet(
                 in_features=3, down=down, up=up, radius=2, gate=harmonic.d2.ScalarGate2d,

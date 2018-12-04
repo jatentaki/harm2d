@@ -4,6 +4,7 @@ import torchvision.transforms as T
 import numpy as np
 from torch.utils.data import DataLoader
 from tqdm import tqdm
+import harmonic.d2 as d2
 
 # local directory
 import loader
@@ -80,7 +81,7 @@ if __name__ == '__main__':
         logger.add_msg('Ignoring warnings')
 
         resize_size = (1024, 768)
-#        crop_size = (584, 584)#(920, 584)
+#        crop_size = (584, 584)
         resize = loader.AspectPreservingResizeTransform(resize_size)
 
         train_transform = loader.Compose([
@@ -131,7 +132,10 @@ if __name__ == '__main__':
                 up=up, down=down, in_features=3
             )
         elif args.model == 'harmonic':
-            network = HUnet(in_features=3, down=down, up=up, size=5, radius=2)
+            network = HUnet(
+                in_features=3, down=down, up=up, size=5, radius=2,
+                gate=d2.ScalarGate2d
+            )
 
         cuda = torch.cuda.is_available()
 
@@ -156,12 +160,6 @@ if __name__ == '__main__':
 
         criteria = [loss_fn]
 
-        if not args.no_jit:
-            example = next(iter(train_loader))[0][0:1].cuda()
-            network = torch.jit.trace(
-                network, example, check_trace=True, optimize=args.optimize
-            )
-
         if args.load:
             checkpoint = framework.load_checkpoint(args.load)
             start_epoch, best_score, model_dict, optim_dict = checkpoint
@@ -173,10 +171,22 @@ if __name__ == '__main__':
             msg = fmt.format(start_epoch, best_score, args.load)
             print(msg)
 
+            for module in network.modules():
+                if hasattr(module, 'relax'):
+                    module.relax()
+                    print(f'relaxing {repr(module)}')
+            print(repr(network))
+
         if not args.load:
             print('Set start epoch and best score to 0')
             best_score = 0.
             start_epoch = 0
+
+        if not args.no_jit:
+            example = next(iter(train_loader))[0][0:1].cuda()
+            network = torch.jit.trace(
+                network, example, check_trace=True, optimize=args.optimize
+            )
 
         if args.action == 'inspect':
             framework.inspect(

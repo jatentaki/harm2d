@@ -1,6 +1,11 @@
 import matplotlib.pyplot as plt
 import numpy as np
-import re, os
+import re, os, argparse
+
+
+parser = argparse.ArgumentParser()
+parser.add_argument('path')
+args = parser.parse_args()
 
 val_re = re.compile('^Validation averagesBCE: (\d+\.\d+)$')
 loss_re = re.compile('^loss: (\d+\.\d+)$')
@@ -32,7 +37,7 @@ def parse_files(base='.'):
         if not m:
             continue
 
-        logp = os.path.join(dir, 'log0.log')
+        logp = os.path.join(base, dir, 'log0.log')
 
         num = int(m.group(1))
         type = m.group(2)
@@ -47,12 +52,12 @@ def parse_files(base='.'):
 
     return parsed
 
-parsed = parse_files()
+parsed = parse_files(args.path)
 styles = {
     ('harmonic', True): '-',
-    ('harmonic', False): '-',
+    ('harmonic', False): 'o',
     ('baseline', True): '--',
-    ('baseline', False): '--',
+    ('baseline', False): 'x',
 }
 
 fig, (train_ax, test_ax) = plt.subplots(2, 1)
@@ -67,7 +72,7 @@ for i, num in enumerate(parsed):
         val, train = parsed[num][type_aug]
         style = styles[type_aug]
 
-        if not aug:
+        if type != 'harmonic':
             continue
         label = f'{num}, {type}, {aug}'
         train_ax.plot(train[:25], color + style, label=label)
