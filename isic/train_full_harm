@@ -1,2 +1,2 @@
 #! /usr/bin/env bash
-python main.py /cvlabdata2/cvlab/datasets_tyszkiewicz/isic2018 artifacts_full_harm harmonic train --lr 1e-3 -b 1 -j 1 --epochs 30
+python main.py /cvlabdata2/cvlab/datasets_tyszkiewicz/isic2018 artifacts_harmonic_expanded harmonic train --lr 1e-3 -b 1 -j 1 --epochs 30

@@ -196,8 +196,14 @@ class HUnet(nn.Module):
         magnitudes = harmonic.cmplx.magnitude(f_gated)
         return self.logit_conv(magnitudes)
 
+    @staticmethod
+    def is_regularized(param_name):
+        return not ('bias' in param_name or 'angular' in param_name)
+
     def l2_params(self):
-        return [p for n, p in self.named_parameters() if 'bias' not in n]
+        return [p for n, p in self.named_parameters() \
+                if HUnet.is_regularized(n)]
 
     def nr_params(self):
-        return [p for n, p in self.named_parameters() if 'bias' in n]
+        return [p for n, p in self.named_parameters() \
+                if not HUnet.is_regularized(n)]
