@@ -15,8 +15,10 @@ import losses, framework
 import criteria as criteria_mod
 from utils import size_adaptive_, maybe_make_dir, print_dict
 from reg_unet import Unet, repr_to_n
-from hunet import HUnet
+from rewrite_hunet import HUnet
 from scheduler import MultiplicativeScheduler
+from dunet import Dunet
+from hunet2 import HUnet as HUnet2
 
 
 if __name__ == '__main__':
@@ -27,7 +29,7 @@ if __name__ == '__main__':
                         help='path to store artifacts')
 
     # behavior choice
-    parser.add_argument('model', choices=['harmonic', 'baseline'])
+    parser.add_argument('model', choices=['harmonic', 'baseline', 'dunet', 'hunet2'])
     parser.add_argument('action', choices=['train', 'evaluate', 'inspect'])
 
     # framework control
@@ -80,20 +82,22 @@ if __name__ == '__main__':
         warnings.simplefilter("ignore")
         logger.add_msg('Ignoring warnings')
 
+#        resize_size = (1164, 772)
         resize_size = (1024, 768)
-#        crop_size = (584, 584)
+#        crop_size = (224 * 3, 224 * 3)
         resize = loader.AspectPreservingResizeTransform(resize_size)
 
+        pad = 88#132
         train_transform = loader.Compose([
             resize,
-            loader.Lift(T.Pad(88)),
+            loader.Lift(T.Pad(pad)),
             loader.Lift(T.ToTensor()),
 #            loader.RandomCropTransform(crop_size)
         ])
 
         test_transform = loader.Compose([
             resize,
-            loader.Lift(T.Pad(88)),
+            loader.Lift(T.Pad(pad)),
             loader.Lift(T.ToTensor()),
 #            loader.CenterCropTransform(crop_size)
         ])
@@ -119,12 +123,13 @@ if __name__ == '__main__':
             )
 
         val_loader = DataLoader(
-            val_data, batch_size=args.batch_size, shuffle=False,
+            val_data, shuffle=False, batch_size=1,#args.batch_size,
             num_workers=args.workers
         )
 
         down = [(5, 5, 5, 5), (5, 5, 5, 5), (5, 5, 5, 5), (5, 5, 5, 5)]
         up = [(5, 5, 5, 5), (5, 5, 5, 5), (5, 5, 5, 5)]
+        gate = functools.partial(d2.ScalarGate2d, mult=1)
         if args.model == 'baseline':
             down = [repr_to_n(d) for d in down]
             up = [repr_to_n(u) for u in up]
@@ -133,8 +138,14 @@ if __name__ == '__main__':
             )
         elif args.model == 'harmonic':
             network = HUnet(
-                in_features=3, down=down, up=up, size=5, radius=2,
-                gate=d2.ScalarGate2d
+                in_features=3, down=down, up=up, size=5, radius=2, gate=gate,
+                norm=d2.ItemNorm2d
+            )
+        elif args.model == 'dunet':
+            network = Dunet()
+        elif args.model == 'hunet2':
+            network = HUnet2(
+                in_features=3, down=down, up=up, size=7, radius=3, gate=gate
             )
 
         cuda = torch.cuda.is_available()
@@ -171,11 +182,11 @@ if __name__ == '__main__':
             msg = fmt.format(start_epoch, best_score, args.load)
             print(msg)
 
-            for module in network.modules():
-                if hasattr(module, 'relax'):
-                    module.relax()
-                    print(f'relaxing {repr(module)}')
-            print(repr(network))
+#            for module in network.modules():
+#                if hasattr(module, 'relax'):
+#                    module.relax()
+#                    print(f'relaxing {repr(module)}')
+#            print(repr(network))
 
         if not args.load:
             print('Set start epoch and best score to 0')
@@ -194,6 +205,7 @@ if __name__ == '__main__':
                 criteria=criteria, early_stop=args.early_stop
             )
         elif args.action == 'evaluate':
+            iou = criteria_mod.ISICIoU(n_thresholds=100)
             callbacks = [iou]
             framework.test(
                 network, val_loader, criteria, logger=logger,
@@ -204,7 +216,7 @@ if __name__ == '__main__':
 
         elif args.action == 'train':
             scheduler = MultiplicativeScheduler(
-                optim, 'min', patience=5, verbose=True, cooldown=0,
+                optim, 'min', patience=3, verbose=True, cooldown=0,
                 cmd_args=args, factor=0.2
             )
 

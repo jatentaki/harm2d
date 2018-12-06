@@ -12,58 +12,62 @@ from torch_dimcheck import dimchecked
 from utils import cut_to_match
 from global_gate import GlobalGate2d
 
+
 def size_is_pow2(t):
     ''' Check if the trailing spatial dimensions are powers of 2 '''
     return all(s % 2 == 0 for s in t.size()[-2:])
 
 
-class BNConv2d(nn.Module):
-    def __init__(self, repr_in, repr_out, size, radius=None, norm=d2.InstanceNorm2d):
-        super(BNConv2d, self).__init__()
+class Conv(nn.Sequential):
+    def __init__(self, repr_in, repr_out, size, radius=None,
+                 norm=d2.InstanceNorm2d, gate=d2.ScalarGate2d):
 
-        self.norm = norm(repr_in)
-        self.conv = d2.HConv2d(repr_in, repr_out, size, radius=radius)
+        norm = norm(repr_in)
+        nonl = gate(repr_in)
+        conv = d2.HConv2d(repr_in, repr_out, size, radius=radius)
 
-    def forward(self, x):
-        y = self.norm(x)
-        y = self.conv(y)
+        super(Conv, self).__init__(norm, nonl, conv)
 
-        return y
 
-class UnetDownBlock(nn.Module):
+class FirstDownBlock(nn.Sequential):
     def __init__(self, in_repr, out_repr, size=5, radius=None, name=None,
-                 first_norm=True, gate=d2.ScalarGate2d, norm=d2.InstanceNorm2d):
-        super(UnetDownBlock, self).__init__()
+                 gate=d2.ScalarGate2d, norm=d2.InstanceNorm2d):
 
         self.name = name
         self.in_repr = in_repr
         self.out_repr = out_repr
-        self.first_norm = first_norm
-        
-        # we don't want to normalize input if its the very first DownBlock
-        if first_norm: 
-            self.conv1 = BNConv2d(in_repr, out_repr, size, radius=radius, norm=norm)
-        else:
-            self.conv1 = d2.HConv2d(in_repr, out_repr, size=size, radius=radius)
 
-        self.nonl1 = gate(out_repr)
-        self.conv2 = BNConv2d(out_repr, out_repr, size, radius=radius, norm=norm)
-        self.nonl2 = gate(out_repr)
+        conv1 = d2.HConv2d(in_repr, out_repr, size=size, radius=radius)
+        conv2 = Conv(out_repr, out_repr, size, radius=radius, norm=norm, gate=gate)
+ 
+        super(FirstDownBlock, self).__init__(conv1, conv2)
+
+class UnetDownBlock(nn.Sequential):
+    def __init__(self, in_repr, out_repr, size=5, radius=None, name=None,
+                 gate=d2.ScalarGate2d, norm=d2.InstanceNorm2d):
+
+        self.name = name
+        self.in_repr = in_repr
+        self.out_repr = out_repr
+        
+        conv1 = Conv(in_repr, out_repr, size, radius=radius, norm=norm)
+        conv2 = Conv(out_repr, out_repr, size, radius=radius, norm=norm)
+
+        super(UnetDownBlock, self).__init__(conv1, conv2)
     
 
     @localized
     @dimchecked
     def forward(self, x: [2, 'b', 'fi', 'hi', 'wi']
-               )     -> ([2, 'b', 'fo', 'ho', 'wo'],
-                         [2, 'b', 'fo', 'ho', 'wo']):
+               )     ->  [2, 'b', 'fo', 'ho', 'wo']:
 
-        y = self.conv1(x)
-        y = self.nonl1(y)
-        y = self.conv2(y)
+        if not size_is_pow2(x):
+            msg = f"Trying to downsample feature map of size {x.size()}"
+            raise RuntimeError(msg)
 
-        y_gated = self.nonl2(y)
+        x = d2.avg_pool2d(x, 2)
 
-        return y_gated, y
+        return super(UnetDownBlock, self).forward(x)
 
 
 class UnetUpBlock(nn.Module):
@@ -79,37 +83,37 @@ class UnetUpBlock(nn.Module):
         self.cat_repr = harmonic.cat_repr(bottom_repr, horizontal_repr)
         self.out_repr = out_repr
 
-        self.nonl1 = gate(self.cat_repr)
-        self.conv1 = BNConv2d(
-            self.cat_repr, self.cat_repr, size, radius=radius, norm=norm
+        conv1 = Conv(
+            self.cat_repr, self.cat_repr, size, radius=radius, norm=norm,
+            gate=gate
         )
 
-        self.nonl2 = gate(self.cat_repr)
-        self.conv2 = BNConv2d(
-            self.cat_repr, self.out_repr, size, radius=radius, norm=norm
+        conv2 = Conv(
+            self.cat_repr, self.out_repr, size, radius=radius, norm=norm,
+            gate=gate
         )
+
+        self.seq = nn.Sequential(conv1, conv2)
 
 
     @localized
     @dimchecked
-    def forward(self, bottom:     [2, 'b', 'fb', 'hb', 'wb'],
-                      horizontal: [2, 'b', 'fh', 'hh', 'wh']
-               )               -> [2, 'b', 'fo', 'ho', 'wo']:
+    def forward(self, bot: [2, 'b', 'fb', 'hb', 'wb'],
+                      hor: [2, 'b', 'fh', 'hh', 'wh']
+               )        -> [2, 'b', 'fo', 'ho', 'wo']:
 
-        horizontal = cut_to_match(bottom, horizontal, n_pref=3)
-        y = d2.cat2d(bottom, self.bottom_repr, horizontal, self.horizontal_repr)
-        y = self.nonl1(y)
-        y = self.conv1(y)
-        y = self.conv2(y)
 
-        return y
+        bot_big = d2.upsample_2d(bot, scale_factor=2)
+        hor = cut_to_match(bot_big, hor, n_pref=3)
+        combined = d2.cat2d(bot_big, self.bottom_repr, hor, self.horizontal_repr)
+
+        return self.seq(combined)
 
 
 @localized_module
 class HUnet(nn.Module):
     def __init__(self, in_features=1, out_features=1, up=None, down=None,
-                 size=5, radius=None, gate=d2.ScalarGate2d,
-                 norm=d2.InstanceNorm2d):
+                 size=5, radius=None, gate=d2.ScalarGate2d, norm=d2.InstanceNorm2d):
 
         super(HUnet, self).__init__()
 
@@ -124,11 +128,14 @@ class HUnet(nn.Module):
         down_dims = [(in_features, )] + down
         self.path_down = nn.ModuleList()
         for i, (d_in, d_out) in enumerate(zip(down_dims[:-1], down_dims[1:])):
-            first_norm = i != 0
+            if i == 0:
+                block_type = FirstDownBlock
+            else:
+                block_type = UnetDownBlock
 
-            block = UnetDownBlock(
-                d_in, d_out, size=size, radius=radius, name='down_{}'.format(i),
-                first_norm=first_norm, gate=gate, norm=norm
+            block = block_type(
+                d_in, d_out, size=size, radius=radius, name=f'down_{i}',
+                gate=gate, norm=norm
             )
             self.path_down.append(block)
 
@@ -138,7 +145,7 @@ class HUnet(nn.Module):
         for i, (d_bot, d_hor, d_out) in enumerate(zip(bot_dims, hor_dims, up)):
             block = UnetUpBlock(
                 d_bot, d_hor, d_out, size=size, radius=radius,
-                name='up_{}'.format(i), gate=gate, norm=norm
+                name=f'up_{i}', gate=gate, norm=norm
             )
             self.path_up.append(block)
 
@@ -157,28 +164,17 @@ class HUnet(nn.Module):
             msg = fmt.format(self.in_features, inp.size(1))
             raise ValueError(msg)
 
-        features_gated = harmonic.cmplx.from_real(inp)
-        features_down = []
+        features = [harmonic.cmplx.from_real(inp)]
         for i, layer in enumerate(self.path_down):
-            if i != 0:
-                if not size_is_pow2(features_gated):
-                    fmt = "Trying to downsample feature map of size {}"
-                    msg = fmt.format(features_gated.size())
-                    raise RuntimeError(msg)
+            features.append(layer(features[-1]))
 
-                features_gated = d2.avg_pool2d(features_gated, 2)
+        f_bot = features[-1]
+        features_horizontal = features[-2::-1]
 
-            features_gated, features  = layer(features_gated)
-            features_down.append(features)
+        for layer, f_hor in zip(self.path_up, features_horizontal):
+            f_bot = layer(f_bot, f_hor)
 
-        f_b = features_down[-1]
-        features_horizontal = features_down[-2::-1]
-
-        for layer, f_h in zip(self.path_up, features_horizontal):
-            f_b = d2.upsample_2d(f_b, scale_factor=2)
-            f_b = layer(f_b, f_h)
-
-        f_gated = self.logit_nonl(f_b)
+        f_gated = self.logit_nonl(f_bot)
         magnitudes = harmonic.cmplx.magnitude(f_gated)
         return self.logit_conv(magnitudes)
 
@@ -197,10 +193,10 @@ class HUnet(nn.Module):
 if __name__ == '__main__':
     down = [(2, 2, 2, 2), (2, 2, 2, 2), (2, 2, 2, 2), (2, 2, 2, 2)]
     up = [(2, 2, 2, 2), (2, 2, 2, 2), (2, 2, 2, 2)]
-    net = HUnet(up=up, down=down, size=7)
+    net = HUnet(up=up, down=down, size=5)
 
-    pad = 264
-    t = torch.randn(2, 1, pad + 1164, pad + 772)
+    pad = 2*88
+    t = torch.randn(1, 1, pad + 1024, pad + 768)
 
     out = net(t)
     print(out.shape)

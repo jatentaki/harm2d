@@ -13,11 +13,11 @@ class Conv(nn.Sequential):
     def __init__(self, n_in, n_out, size, **kwargs):
         padding = size // 2
 
-        bn = nn.BatchNorm2d(n_in)
-        conv = nn.Conv2d(n_in, n_out, size, padding=padding, **kwargs)
+        bn = nn.InstanceNorm2d(n_in)
         relu = nn.ReLU(inplace=True)
+        conv = nn.Conv2d(n_in, n_out, size, padding=padding, **kwargs)
 
-        super(Conv, self).__init__(bn, conv, relu)
+        super(Conv, self).__init__(bn, relu, conv)
 
 
 class Dense(nn.Sequential):
@@ -59,7 +59,7 @@ class Dunet(nn.Module):
     def __init__(self):
         super(Dunet, self).__init__()
 
-        self.conv1 = Conv(3, 96, 7, stride=2)
+        self.conv1 = nn.Conv2d(3, 96, 7, stride=2, padding=3)
         self.pool1 = nn.MaxPool2d(3, stride=2, padding=1)
 
         self.dense1 = Dense(6, n_in=96)
@@ -106,6 +106,14 @@ class Dunet(nn.Module):
         logits = self.logit_conv(u5)
 
         return logits
+
+
+    def l2_params(self):
+        return [p for n, p in self.named_parameters() if 'bias' not in n]
+
+
+    def nr_params(self):
+        return [p for n, p in self.named_parameters() if 'bias' in n]
 
 
 if __name__ == '__main__':
