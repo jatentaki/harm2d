@@ -22,13 +22,7 @@ class Conv(nn.Sequential):
 
         norm = norm(repr_in)
         nonl = gate(repr_in)
-        if size == 1:
-            if radius is not None:
-                raise ValueError(f"Specified radius {radius} for 1x1 conv")
-
-            conv = d2.HConv1x1_2d(repr_in, repr_out)
-        else:
-            conv = d2.HConv2d(repr_in, repr_out, size, radius=radius)
+        conv = d2.HConv2d(repr_in, repr_out, size, radius=radius)
 
         super(Conv, self).__init__(norm, nonl, conv)
 
