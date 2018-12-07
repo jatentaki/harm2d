@@ -15,7 +15,7 @@ import losses, framework
 import criteria as criteria_mod
 from utils import size_adaptive_, maybe_make_dir, print_dict
 from reg_unet import Unet, repr_to_n
-from rewrite_hunet import HUnet
+from hunet import HUnet
 from scheduler import MultiplicativeScheduler
 from dunet import Dunet
 from hunet2 import HUnet as HUnet2
@@ -139,7 +139,6 @@ if __name__ == '__main__':
         elif args.model == 'harmonic':
             network = HUnet(
                 in_features=3, down=down, up=up, size=5, radius=2, gate=gate,
-                norm=d2.ItemNorm2d
             )
         elif args.model == 'dunet':
             network = Dunet()
