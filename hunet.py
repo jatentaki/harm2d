@@ -42,11 +42,9 @@ class FirstDownBlock(nn.Sequential):
         self.out_repr = out_repr
 
         conv1 = d2.HConv2d(in_repr, out_repr, size=size, radius=radius)
-        conv2 = Conv(out_repr, out_repr, 1, norm=norm, gate=gate)
-        conv3 = Conv(out_repr, out_repr, size, radius=radius, norm=norm, gate=gate)
-        conv4 = Conv(out_repr, out_repr, 1, norm=norm, gate=gate)
+        conv2 = Conv(out_repr, out_repr, size, radius=radius, norm=norm, gate=gate)
  
-        super(FirstDownBlock, self).__init__(conv1, conv2, conv3, conv4)
+        super(FirstDownBlock, self).__init__(conv1, conv2)
 
 class UnetDownBlock(nn.Sequential):
     def __init__(self, in_repr, out_repr, size=5, radius=None, name=None,
@@ -57,11 +55,9 @@ class UnetDownBlock(nn.Sequential):
         self.out_repr = out_repr
         
         conv1 = Conv(in_repr, out_repr, size, radius=radius, norm=norm, gate=gate)
-        conv2 = Conv(out_repr, out_repr, 1, norm=norm, gate=gate)
-        conv3 = Conv(out_repr, out_repr, size, radius=radius, norm=norm, gate=gate)
-        conv4 = Conv(out_repr, out_repr, 1, norm=norm, gate=gate)
+        conv2 = Conv(out_repr, out_repr, size, radius=radius, norm=norm, gate=gate)
 
-        super(UnetDownBlock, self).__init__(conv1, conv2, conv3, conv4)
+        super(UnetDownBlock, self).__init__(conv1, conv2)
     
 
     @localized
@@ -97,19 +93,11 @@ class UnetUpBlock(nn.Module):
         )
 
         conv2 = Conv(
-            self.cat_repr, self.cat_repr, 1, norm=norm, gate=gate
-        )
-
-        conv3 = Conv(
-            self.cat_repr, self.cat_repr, size, radius=radius, norm=norm,
+            self.cat_repr, self.out_repr, size, radius=radius, norm=norm,
             gate=gate
         )
 
-        conv4 = Conv(
-            self.cat_repr, self.out_repr, 1, norm=norm, gate=gate
-        )
-
-        self.seq = nn.Sequential(conv1, conv2, conv3, conv4)
+        self.seq = nn.Sequential(conv1, conv2)
 
 
     @localized
