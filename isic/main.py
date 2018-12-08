@@ -17,9 +17,6 @@ from utils import size_adaptive_, maybe_make_dir, print_dict
 from reg_unet import Unet, repr_to_n
 from hunet import HUnet
 from scheduler import MultiplicativeScheduler
-from dunet import Dunet
-from hunet2 import HUnet as HUnet2
-
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='PyTorch 2d segmentation')
@@ -90,9 +87,9 @@ if __name__ == '__main__':
         pad = 88#132
         train_transform = loader.Compose([
             resize,
-            loader.Lift(T.Pad(pad)),
+            loader.Lift(T.Pad(pad + 1)),
             loader.Lift(T.ToTensor()),
-#            loader.RandomCropTransform(crop_size)
+            loader.RandomCropTransform((768 + 2 * 88, 1024 + 2 * 88))
         ])
 
         test_transform = loader.Compose([

@@ -26,6 +26,51 @@ class Conv(nn.Sequential):
 
         super(Conv, self).__init__(norm, nonl, conv)
 
+class TrivialUpsample(nn.Module):
+    def __init__(self, *args, **kwargs):
+        super(Upsample, self).__init__()
+
+    def forward(self, x):
+        return d2.upsample_2d(x, scale_factor=2)
+
+class TrivialDownsample(nn.Module):
+    def __init__(self, *args, **kwargs):
+        super(Downsample, self).__init__()
+
+    def forward(self, x):
+        return d2.avg_pool2d(x, 2)
+
+class Upsample(nn.Sequential):
+    def __init__(self, repr, size, radius=None,
+                 norm=d2.InstanceNorm2d, gate=d2.ScalarGate2d):
+
+        conv_kwargs = {
+            'stride': 2,
+            'output_padding': 1
+        }
+        norm = norm(repr)
+        nonl = gate(repr)
+        conv = d2.HConv2dTranspose(
+            repr, repr, size, radius=radius, conv_kwargs=conv_kwargs
+        )
+
+        super(Upsample, self).__init__(norm, nonl, conv)
+
+class Downsample(nn.Sequential):
+    def __init__(self, repr, size, radius=None, norm=d2.InstanceNorm2d,
+                 gate=d2.ScalarGate2d):
+
+        conv_kwargs = {
+            'stride': 2,
+            'padding': size // 2
+        }
+        norm = norm(repr)
+        nonl = gate(repr)
+        conv = d2.HConv2d(
+            repr, repr, size, radius=radius, conv_kwargs=conv_kwargs
+        )
+
+        super(Downsample, self).__init__(norm, nonl, conv)
 
 class FirstDownBlock(nn.Sequential):
     def __init__(self, in_repr, out_repr, size=5, radius=None, name=None,
@@ -48,11 +93,12 @@ class UnetDownBlock(nn.Sequential):
         self.in_repr = in_repr
         self.out_repr = out_repr
         
+        downsample = Downsample(in_repr, size, radius=radius, norm=norm, gate=gate)
         conv1 = Conv(in_repr, out_repr, size, radius=radius, norm=norm, gate=gate)
         conv2 = Conv(out_repr, out_repr, size, radius=radius, norm=norm, gate=gate)
 
-        super(UnetDownBlock, self).__init__(conv1, conv2)
-    
+        super(UnetDownBlock, self).__init__(downsample, conv1, conv2)
+
 
     @localized
     @dimchecked
@@ -62,8 +108,6 @@ class UnetDownBlock(nn.Sequential):
         if not size_is_pow2(x):
             msg = f"Trying to downsample feature map of size {x.size()}"
             raise RuntimeError(msg)
-
-        x = d2.avg_pool2d(x, 2)
 
         return super(UnetDownBlock, self).forward(x)
 
@@ -80,6 +124,10 @@ class UnetUpBlock(nn.Module):
         self.horizontal_repr = horizontal_repr
         self.cat_repr = harmonic.cat_repr(bottom_repr, horizontal_repr)
         self.out_repr = out_repr
+
+        self.upsample = Upsample(
+            bottom_repr, size, radius=radius, norm=norm, gate=gate
+        )
 
         conv1 = Conv(
             self.cat_repr, self.cat_repr, size, radius=radius, norm=norm,
@@ -101,7 +149,7 @@ class UnetUpBlock(nn.Module):
                )        -> [2, 'b', 'fo', 'ho', 'wo']:
 
 
-        bot_big = d2.upsample_2d(bot, scale_factor=2)
+        bot_big = self.upsample(bot)
         hor = cut_to_match(bot_big, hor, n_pref=3)
         combined = d2.cat2d(bot_big, self.bottom_repr, hor, self.horizontal_repr)
 

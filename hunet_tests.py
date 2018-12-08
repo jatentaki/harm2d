@@ -1,8 +1,8 @@
 import unittest, torch
 
-from harmonic.cmplx import from_real
+from harmonic.cmplx import from_real, magnitude
 
-from hunet import HUnet, UnetDownBlock, UnetUpBlock
+from hunet import HUnet, Upsample, Downsample
 
 def rot90(x, k=1, plane=(2, 3)):
     if k == 0:
@@ -32,7 +32,7 @@ class EquivarianceTests(unittest.TestCase):
         diff = self._diff_rotation(net, inp, plane=plane)
         self.assertLess(diff, 1e-5)
 
-    def _test_equivariant_output(self, net_builder, train=True, real=False, ins=1):
+    def _test_equivariant_output(self, net_builder, train=True, real=False, ins=1, s=92):
         cuda = torch.cuda.is_available()
 
         if cuda:
@@ -53,7 +53,6 @@ class EquivarianceTests(unittest.TestCase):
         else:
             net.eval()
 
-        s = 92
         input = torch.randn(2, ins, s, s)
         if cuda:
             input = input.cuda()
@@ -87,4 +86,5 @@ class HunetTests(EquivarianceTests):
         builder = lambda : HUnet(in_features=3, down=down, up=up)
         self._test_equivariant_output(builder, ins=3)
 
-unittest.main(failfast=True)
+
+unittest.main()
