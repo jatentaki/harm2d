@@ -11,61 +11,69 @@ from torch_dimcheck import dimchecked
 
 from utils import cut_to_match
 
+
 def size_is_pow2(t):
     ''' Check if the trailing spatial dimensions are powers of 2 '''
     return all(s % 2 == 0 for s in t.size()[-2:])
 
 
-class Conv(nn.Sequential):
-    def __init__(self, repr_in, repr_out, size, radius=None,
-                 norm=d2.InstanceNorm2d, gate=d2.ScalarGate2d):
-
-        norm = norm(repr_in)
-        nonl = gate(repr_in)
-        conv = d2.HConv2d(repr_in, repr_out, size, radius=radius)
-
-        super(Conv, self).__init__(norm, nonl, conv)
-
 class TrivialUpsample(nn.Module):
     def __init__(self, *args, **kwargs):
-        super(Upsample, self).__init__()
+        super(TrivialUpsample, self).__init__()
 
     def forward(self, x):
         return d2.upsample_2d(x, scale_factor=2)
 
+
 class TrivialDownsample(nn.Module):
     def __init__(self, *args, **kwargs):
-        super(Downsample, self).__init__()
+        super(TrivialDownsample, self).__init__()
 
     def forward(self, x):
         return d2.avg_pool2d(x, 2)
 
-class Upsample(nn.Sequential):
-    def __init__(self, repr, size, radius=None,
-                 norm=d2.InstanceNorm2d, gate=d2.ScalarGate2d):
 
+default_setup = {
+    'gate': d2.ScalarGate2d,
+    'norm': d2.InstanceNorm2d,
+    'upsample': TrivialUpsample,
+    'downsample': TrivialDownsample
+}
+
+
+class Conv(nn.Sequential):
+    def __init__(self, repr_in, repr_out, size, radius=None, setup=default_setup):
+        norm = setup['norm'](repr_in)
+        nonl = setup['gate'](repr_in)
+        conv = d2.HConv2d(repr_in, repr_out, size, radius=radius)
+
+        super(Conv, self).__init__(norm, nonl, conv)
+
+
+class Upsample(nn.Sequential):
+    def __init__(self, repr, size, radius=None, setup=default_setup):
         conv_kwargs = {
             'stride': 2,
             'output_padding': 1
         }
-        norm = norm(repr)
-        nonl = gate(repr)
+        norm = setup['norm'](repr)
+        nonl = setup['gate'](repr)
         conv = d2.HConv2dTranspose(
             repr, repr, size, radius=radius, conv_kwargs=conv_kwargs
         )
 
         super(Upsample, self).__init__(norm, nonl, conv)
 
+
 class Downsample(nn.Sequential):
-    def __init__(self, repr, size, radius=None, norm=d2.InstanceNorm2d,
-                 gate=d2.ScalarGate2d):
+    def __init__(self, repr, size, radius=None, setup=default_setup):
 
         conv_kwargs = {
             'stride': 2,
             'padding': size // 2
         }
-        norm = norm(repr)
-        nonl = gate(repr)
+        norm = setup['norm'](repr)
+        nonl = setup['gate'](repr)
         conv = d2.HConv2d(
             repr, repr, size, radius=radius, conv_kwargs=conv_kwargs
         )
@@ -74,28 +82,28 @@ class Downsample(nn.Sequential):
 
 class FirstDownBlock(nn.Sequential):
     def __init__(self, in_repr, out_repr, size=5, radius=None, name=None,
-                 gate=d2.ScalarGate2d, norm=d2.InstanceNorm2d):
+                 setup=default_setup):
 
         self.name = name
         self.in_repr = in_repr
         self.out_repr = out_repr
 
         conv1 = d2.HConv2d(in_repr, out_repr, size=size, radius=radius)
-        conv2 = Conv(out_repr, out_repr, size, radius=radius, norm=norm, gate=gate)
+        conv2 = Conv(out_repr, out_repr, size, radius=radius, setup=setup)
  
         super(FirstDownBlock, self).__init__(conv1, conv2)
 
 class UnetDownBlock(nn.Sequential):
     def __init__(self, in_repr, out_repr, size=5, radius=None, name=None,
-                 gate=d2.ScalarGate2d, norm=d2.InstanceNorm2d):
+                 setup=default_setup):
 
         self.name = name
         self.in_repr = in_repr
         self.out_repr = out_repr
         
-        downsample = Downsample(in_repr, size, radius=radius, norm=norm, gate=gate)
-        conv1 = Conv(in_repr, out_repr, size, radius=radius, norm=norm, gate=gate)
-        conv2 = Conv(out_repr, out_repr, size, radius=radius, norm=norm, gate=gate)
+        downsample = setup['downsample'](in_repr, size, radius=radius, setup=setup)
+        conv1 = Conv(in_repr, out_repr, size, radius=radius, setup=setup)
+        conv2 = Conv(out_repr, out_repr, size, radius=radius, setup=setup)
 
         super(UnetDownBlock, self).__init__(downsample, conv1, conv2)
 
@@ -114,8 +122,7 @@ class UnetDownBlock(nn.Sequential):
 
 class UnetUpBlock(nn.Module):
     def __init__(self, bottom_repr, horizontal_repr, out_repr,
-                 size=5, radius=None, name=None,
-                 gate=d2.ScalarGate2d, norm=d2.InstanceNorm2d):
+                 size=5, radius=None, name=None, setup=default_setup):
 
         super(UnetUpBlock, self).__init__()
 
@@ -125,18 +132,16 @@ class UnetUpBlock(nn.Module):
         self.cat_repr = harmonic.cat_repr(bottom_repr, horizontal_repr)
         self.out_repr = out_repr
 
-        self.upsample = Upsample(
-            bottom_repr, size, radius=radius, norm=norm, gate=gate
+        self.upsample = setup['upsample'](
+            bottom_repr, size, radius=radius, setup=setup
         )
 
         conv1 = Conv(
-            self.cat_repr, self.cat_repr, size, radius=radius, norm=norm,
-            gate=gate
+            self.cat_repr, self.cat_repr, size, radius=radius, setup=setup
         )
 
         conv2 = Conv(
-            self.cat_repr, self.out_repr, size, radius=radius, norm=norm,
-            gate=gate
+            self.cat_repr, self.out_repr, size, radius=radius, setup=setup,
         )
 
         self.seq = nn.Sequential(conv1, conv2)
@@ -159,7 +164,7 @@ class UnetUpBlock(nn.Module):
 @localized_module
 class HUnet(nn.Module):
     def __init__(self, in_features=1, out_features=1, up=None, down=None,
-                 size=5, radius=None, gate=d2.ScalarGate2d, norm=d2.InstanceNorm2d):
+                 size=5, radius=None, setup=default_setup):
 
         super(HUnet, self).__init__()
 
@@ -180,8 +185,7 @@ class HUnet(nn.Module):
                 block_type = UnetDownBlock
 
             block = block_type(
-                d_in, d_out, size=size, radius=radius, name=f'down_{i}',
-                gate=gate, norm=norm
+                d_in, d_out, size=size, radius=radius, name=f'down_{i}', setup=setup
             )
             self.path_down.append(block)
 
@@ -191,11 +195,11 @@ class HUnet(nn.Module):
         for i, (d_bot, d_hor, d_out) in enumerate(zip(bot_dims, hor_dims, up)):
             block = UnetUpBlock(
                 d_bot, d_hor, d_out, size=size, radius=radius,
-                name=f'up_{i}', gate=gate, norm=norm
+                name=f'up_{i}', setup=setup
             )
             self.path_up.append(block)
 
-        self.logit_nonl = gate(up[-1])
+        self.logit_nonl = setup['gate'](up[-1])
         self.logit_conv = nn.Conv2d(sum(up[-1]), self.out_features, 1)
 
         self.n_params = 0

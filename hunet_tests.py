@@ -2,7 +2,7 @@ import unittest, torch
 
 from harmonic.cmplx import from_real, magnitude
 
-from hunet import HUnet, Upsample, Downsample
+from hunet import HUnet
 
 def rot90(x, k=1, plane=(2, 3)):
     if k == 0:
