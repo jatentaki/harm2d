@@ -68,19 +68,9 @@ if __name__ == '__main__':
 
         logger.add_dict(vars(args))
 
-        img_transform = T.Compose([
-            T.ToTensor()
-        ])
-
-        lbl_transform = T.Compose([
-            T.ToTensor(),
-            loader.ToBinary()
-        ])
-
         train_data = loader.DriveDataset(
-            args.data_path, training=True, bloat=args.bloat, from_=args.cut,
-            img_transform=img_transform, label_transform=lbl_transform,
-            global_transform=train_global_transform
+            args.data_path, training=True, bloat=args.bloat,
+            label_transform=loader.ToBinary(),
         )
         train_loader = DataLoader(
             train_data, batch_size=args.batch_size, shuffle=True, num_workers=args.workers
@@ -88,13 +78,11 @@ if __name__ == '__main__':
 
         if args.test_on_train:
             val_data = loader.DriveDataset(
-                args.data_path, training=True, img_transform=img_transform,
-                label_transform=lbl_transform,
+                args.data_path, training=True, label_transform=loader.ToBinary(),
             )
         else:
             val_data = loader.DriveDataset(
-                args.data_path, training=False, img_transform=img_transform,
-                label_transform=lbl_transform
+                args.data_path, training=False, label_transform=loader.ToBinary()
             )
 
         val_loader = DataLoader(
@@ -105,8 +93,7 @@ if __name__ == '__main__':
         up = [(5, 7, 5), (2, 5, 2)]
         if args.model == 'harmonic':
             network = HUnet(
-                in_features=3, down=down, up=up, radius=2, gate=harmonic.d2.ScalarGate2d,
-                norm=harmonic.d2.BatchNorm2d
+                in_features=3, down=down, up=up, radius=2
             )
         elif args.model == 'baseline':
             down = [repr_to_n(d) for d in down]

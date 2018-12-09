@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+DATA=/home/jatentaki/Storage/jatentaki/Datasets/glas
+#DATA=/cvlabdata2/cvlab/datasets_tyszkiewicz/drive
+python main.py $DATA artifacts_glas harmonic train -b 3 -j 2 --bloat 750 --epochs 25 --lr 1e-3 -nj

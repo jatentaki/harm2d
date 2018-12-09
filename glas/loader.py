@@ -1,31 +1,25 @@
-import torch, os, imageio, re, random
+import torch, os, imageio, re, random, sys
 import torchvision as tv
 import torchvision.transforms as T
 from itertools import cycle, islice
 from PIL import Image
 
-class RandomRotate:
-    def __call__(self, *imgs):
-        angle = random.randint(-180, 180)
-
-        rotated = []
-        for img in imgs:
-            if img.mode == 'L':
-                rotated.append(img.rotate(angle, resample=Image.NEAREST))
-            elif img.mode == 'RGB':
-                rotated.append(img.rotate(angle, resample=Image.BICUBIC))
-            else:
-                raise ValueError("Encountered unsupported mode `{}`".format(img.mode))
-
-        return rotated
+sys.path.append('..')
+import transforms as tr
 
 class ToBinary:
     def __call__(self, lbl):
         return lbl != 0
 
+DEFAULT_GLOBAL_TRANSFORM = tr.Compose([
+    tr.PadTransform((776 + 2 * 88, 528 + 2 * 88)),
+    tr.Lift(T.ToTensor())
+])
+    
 class DriveDataset:
-    def __init__(self, path, training=True, img_transform=T.ToTensor(),
-                 label_transform=T.ToTensor(), global_transform=None, bloat=None):
+    def __init__(self, path, training=True, img_transform=None,
+                 label_transform=None, mask_transform=None,
+                 global_transform=DEFAULT_GLOBAL_TRANSFORM, bloat=None):
         self.training = training
 
         self.subdir = 'train' if training else 'test'
@@ -33,6 +27,7 @@ class DriveDataset:
 
         self.global_transform = global_transform
         self.img_transform = img_transform
+        self.mask_transform = mask_transform
         self.label_transform = label_transform
 
         img_re = re.compile('^testA_(\d+)\.bmp$')
@@ -74,14 +69,19 @@ class DriveDataset:
         path = os.path.join(self.path, f'testA_{id}.bmp')
         return Image.fromarray(imageio.imread(path))
 
+
     def __len__(self):
         return len(self.samples)
     
     def __getitem__(self, idx):
         img, label = self.samples[idx]
-
+        mask = Image.new('L', label.size, color=255)
+ 
         if self.global_transform:
-            img, label = self.global_transform(img, label)
+            img, mask, label = self.global_transform(img, mask, label)
+
+        if self.mask_transform:
+            mask = self.mask_transform(mask)
 
         if self.img_transform:
             img = self.img_transform(img)
@@ -89,10 +89,10 @@ class DriveDataset:
         if self.label_transform:
             label = self.label_transform(label)
 
-        return img, label 
+        return img, mask, label 
 
 if __name__ == '__main__':
-    lbl_trans = T.Compose([T.ToTensor(), ToBinary()])
+    lbl_trans = T.Compose([ToBinary()])
     d = DriveDataset(
         '/home/jatentaki/Storage/jatentaki/Datasets/glas',
         label_transform=lbl_trans
@@ -101,9 +101,12 @@ if __name__ == '__main__':
     import matplotlib.pyplot as plt
 
     for i in range(5):
-        img, lbl = d[i]
-        fig, (a1, a2) = plt.subplots(2)
+        img, mask, lbl = d[i]
+        fig, (a1, a2, a3) = plt.subplots(3)
 
+        print(img.shape)
         a1.imshow(img.permute(1, 2, 0).numpy())
-        a2.imshow(lbl[0].numpy())
+        a2.imshow(mask[0].numpy())
+        a3.imshow(lbl[0].numpy())
+
         plt.show()
