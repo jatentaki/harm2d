@@ -1,0 +1,51 @@
+#!/usr/bin/env python
+import subprocess, sys, os, platform, getpass, time, datetime, psutil, signal
+
+KILL_DIR = '/cvlabdata2/gentleHijacker/processes2kill'
+STEP_S = 5
+
+_script_name, *cmds = sys.argv
+cmds = [os.path.expandvars(os.path.expanduser(a)) for a in cmds]
+
+# start the job
+print('HIJACKER: executing ' + ' '.join(cmds))
+job = subprocess.Popen(cmds)
+print(f'HIJACKER: job {job.pid} started')
+
+# prepare the killer file
+hostname = platform.node()
+user = getpass.getuser()
+control_path = f'{KILL_DIR}/{hostname}_{user}_{job.pid}'
+os.umask(0)
+open(control_path, 'a').close()
+print(f'created {control_path}')
+
+def control_file_exists():
+    return os.path.isfile(control_path)
+
+assert control_file_exists()
+
+def kill_child_processes(parent_pid, sig=signal.SIGTERM):
+    parent = psutil.Process(parent_pid)
+    children = parent.children(recursive=True)
+    for process in children:
+        process.send_signal(sig)
+    parent.send_signal(sig)
+
+while True:
+    time.sleep(STEP_S)
+    completed = job.poll() is not None
+    now = str(datetime.datetime.now())
+    if completed:
+        print(f'HIJACKER: job {job.pid} ended at {now}')
+        if control_file_exists():
+            os.remove(control_path)
+            print(f'HIJACKER: removed {control_path}')
+        else:
+            print(f'HIJACKER: {control_path} not found')
+        break
+
+    if not control_file_exists():
+        kill_child_processes(job.pid)
+        print(f'HIJACKER: job {job.pid} killed at {now}')
+        break

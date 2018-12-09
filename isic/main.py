@@ -4,6 +4,7 @@ import torchvision.transforms as T
 import numpy as np
 from torch.utils.data import DataLoader
 from tqdm import tqdm
+import harmonic.d2 as d2
 
 # local directory
 import loader
@@ -17,7 +18,6 @@ from reg_unet import Unet, repr_to_n
 from hunet import HUnet
 from scheduler import MultiplicativeScheduler
 
-
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='PyTorch 2d segmentation')
     # paths
@@ -26,7 +26,7 @@ if __name__ == '__main__':
                         help='path to store artifacts')
 
     # behavior choice
-    parser.add_argument('model', choices=['harmonic', 'baseline'])
+    parser.add_argument('model', choices=['harmonic', 'baseline', 'dunet', 'hunet2'])
     parser.add_argument('action', choices=['train', 'evaluate', 'inspect'])
 
     # framework control
@@ -79,20 +79,22 @@ if __name__ == '__main__':
         warnings.simplefilter("ignore")
         logger.add_msg('Ignoring warnings')
 
+#        resize_size = (1164, 772)
         resize_size = (1024, 768)
-#        crop_size = (584, 584)#(920, 584)
+#        crop_size = (224 * 3, 224 * 3)
         resize = loader.AspectPreservingResizeTransform(resize_size)
 
+        pad = 88#132
         train_transform = loader.Compose([
             resize,
-            loader.Lift(T.Pad(88)),
+            loader.Lift(T.Pad(pad + 1)),
             loader.Lift(T.ToTensor()),
-#            loader.RandomCropTransform(crop_size)
+            loader.RandomCropTransform((768 + 2 * 88, 1024 + 2 * 88))
         ])
 
         test_transform = loader.Compose([
             resize,
-            loader.Lift(T.Pad(88)),
+            loader.Lift(T.Pad(pad)),
             loader.Lift(T.ToTensor()),
 #            loader.CenterCropTransform(crop_size)
         ])
@@ -118,12 +120,13 @@ if __name__ == '__main__':
             )
 
         val_loader = DataLoader(
-            val_data, batch_size=args.batch_size, shuffle=False,
+            val_data, shuffle=False, batch_size=1,#args.batch_size,
             num_workers=args.workers
         )
 
         down = [(5, 5, 5, 5), (5, 5, 5, 5), (5, 5, 5, 5), (5, 5, 5, 5)]
         up = [(5, 5, 5, 5), (5, 5, 5, 5), (5, 5, 5, 5)]
+        gate = functools.partial(d2.ScalarGate2d, mult=1)
         if args.model == 'baseline':
             down = [repr_to_n(d) for d in down]
             up = [repr_to_n(u) for u in up]
@@ -131,7 +134,15 @@ if __name__ == '__main__':
                 up=up, down=down, in_features=3
             )
         elif args.model == 'harmonic':
-            network = HUnet(in_features=3, down=down, up=up, size=5, radius=2)
+            network = HUnet(
+                in_features=3, down=down, up=up, size=5, radius=2, gate=gate,
+            )
+        elif args.model == 'dunet':
+            network = Dunet()
+        elif args.model == 'hunet2':
+            network = HUnet2(
+                in_features=3, down=down, up=up, size=7, radius=3, gate=gate
+            )
 
         cuda = torch.cuda.is_available()
 
@@ -156,12 +167,6 @@ if __name__ == '__main__':
 
         criteria = [loss_fn]
 
-        if not args.no_jit:
-            example = next(iter(train_loader))[0][0:1].cuda()
-            network = torch.jit.trace(
-                network, example, check_trace=True, optimize=args.optimize
-            )
-
         if args.load:
             checkpoint = framework.load_checkpoint(args.load)
             start_epoch, best_score, model_dict, optim_dict = checkpoint
@@ -173,10 +178,22 @@ if __name__ == '__main__':
             msg = fmt.format(start_epoch, best_score, args.load)
             print(msg)
 
+#            for module in network.modules():
+#                if hasattr(module, 'relax'):
+#                    module.relax()
+#                    print(f'relaxing {repr(module)}')
+#            print(repr(network))
+
         if not args.load:
             print('Set start epoch and best score to 0')
             best_score = 0.
             start_epoch = 0
+
+        if not args.no_jit:
+            example = next(iter(train_loader))[0][0:1].cuda()
+            network = torch.jit.trace(
+                network, example, check_trace=True, optimize=args.optimize
+            )
 
         if args.action == 'inspect':
             framework.inspect(
@@ -184,6 +201,7 @@ if __name__ == '__main__':
                 criteria=criteria, early_stop=args.early_stop
             )
         elif args.action == 'evaluate':
+            iou = criteria_mod.ISICIoU(n_thresholds=100)
             callbacks = [iou]
             framework.test(
                 network, val_loader, criteria, logger=logger,
@@ -194,7 +212,7 @@ if __name__ == '__main__':
 
         elif args.action == 'train':
             scheduler = MultiplicativeScheduler(
-                optim, 'min', patience=5, verbose=True, cooldown=0,
+                optim, 'min', patience=3, verbose=True, cooldown=0,
                 cmd_args=args, factor=0.2
             )
 

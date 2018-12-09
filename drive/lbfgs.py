@@ -1,4 +1,4 @@
-import torch, argparse, functools, itertools, os, warnings, imageio, sys
+import torch, argparse, itertools, os, warnings, imageio, sys
 import torch.nn.functional as F
 import torchvision.transforms as T
 import numpy as np
@@ -17,6 +17,7 @@ from hunet import HUnet
 
 # `drive` directory
 import loader
+import lbfgs_train
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='PyTorch 2d segmentation')
@@ -44,10 +45,8 @@ if __name__ == '__main__':
                         help='number of data loader workers')
     parser.add_argument('-b', '--batch-size', metavar='N', default=1, type=int,
                         help='batch size')
-    parser.add_argument('--l2', metavar='F', default=1e-5, type=float,
-                        help='l2 regularization strength')
-    parser.add_argument('--lr', metavar='F', default=1e-4, type=float,
-                        help='learning rate (ADAM)')
+    parser.add_argument('--lr', metavar='F', default=1, type=float,
+                        help='learning rate (LBFGS)')
     parser.add_argument('--epochs', metavar='N', default=10, type=int,
                         help='number of epochs to train for')
     parser.add_argument('-s', '--early_stop', default=None, type=int,
@@ -134,10 +133,7 @@ if __name__ == '__main__':
         loss_fn = size_adaptive_(BCE)()
         loss_fn.name = 'BCE'
 
-        optim = torch.optim.Adam([
-            {'params': network.l2_params(), 'weight_decay': args.l2},
-            {'params': network.nr_params(), 'weight_decay': 0.},
-        ], lr=args.lr)
+        optim = torch.optim.LBFGS(network.parameters(), lr=args.lr)
 
         criteria = [loss_fn]
 
@@ -187,7 +183,7 @@ if __name__ == '__main__':
             )
 
             for epoch in range(start_epoch, args.epochs):
-                train_loss = framework.train(
+                train_loss = lbfgs_train.train(
                     network, train_loader, loss_fn, optim, epoch,
                     early_stop=args.early_stop, logger=logger
                 )
