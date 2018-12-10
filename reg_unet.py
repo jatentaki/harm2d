@@ -13,18 +13,26 @@ def size_is_pow2(t):
 
 
 class AttentionGate(nn.Module):
-    def __init__(self, n_features):
+    def __init__(self, n_features, mult=1):
         super(AttentionGate, self).__init__()
         self.n_features = n_features
+        self.mult = mult
     
-        self.conv1 = nn.Conv2d(self.n_features, self.n_features, 1)
-        self.conv2 = nn.Conv2d(self.n_features, self.n_features, 1)
+        if mult == 1:
+            self.seq = nn.Sequential(
+                nn.Conv2d(self.n_features, self.n_features, 1),
+                nn.Sigmoid()
+            )
+        elif mult == 2:
+            self.seq = nn.Sequential(
+                nn.Conv2d(self.n_features, self.n_features, 1),
+                nn.ReLU(inplace=True),
+                nn.Conv2d(self.n_features, self.n_features, 1),
+                nn.Sigmoid()
+            )
 
     def forward(self, inp):
-        y = self.conv1(inp)
-        y = F.relu(y)
-        y = self.conv2(y)
-        g = torch.sigmoid(y)
+        g = self.seq(inp)
 
         return g * inp
 

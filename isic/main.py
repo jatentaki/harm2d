@@ -10,7 +10,7 @@ import harmonic.d2 as d2
 import loader
 
 # parent directory
-sys.path.append('../')
+sys.path.append('..')
 import losses, framework
 import criteria as criteria_mod
 from utils import size_adaptive_, maybe_make_dir, print_dict
@@ -26,7 +26,7 @@ if __name__ == '__main__':
                         help='path to store artifacts')
 
     # behavior choice
-    parser.add_argument('model', choices=['harmonic', 'baseline', 'dunet', 'hunet2'])
+    parser.add_argument('model', choices=['harmonic', 'baseline'])
     parser.add_argument('action', choices=['train', 'evaluate', 'inspect'])
 
     # framework control
@@ -79,28 +79,12 @@ if __name__ == '__main__':
         warnings.simplefilter("ignore")
         logger.add_msg('Ignoring warnings')
 
-#        resize_size = (1164, 772)
-        resize_size = (1024, 768)
-#        crop_size = (224 * 3, 224 * 3)
-        resize = loader.AspectPreservingResizeTransform(resize_size)
-
-        pad = 88#132
-        train_transform = loader.Compose([
-            resize,
-            loader.Lift(T.Pad(pad + 1)),
-            loader.Lift(T.ToTensor()),
-            loader.RandomCropTransform((768 + 2 * 88, 1024 + 2 * 88))
-        ])
-
-        test_transform = loader.Compose([
-            resize,
-            loader.Lift(T.Pad(pad)),
-            loader.Lift(T.ToTensor()),
-#            loader.CenterCropTransform(crop_size)
-        ])
-
         train_data = loader.ISICDataset(
-            args.data_path + '/train', global_transform=train_transform,
+            args.data_path + '/train', global_transform=loader.ROTATE_TRANS_1024,
+            img_transform=T.Compose([
+                T.ColorJitter(0.1, 0.1, 0.1, hue=0.05),
+                T.ToTensor()
+            ]),
             normalize=True
         )
         train_loader = DataLoader(
@@ -110,23 +94,22 @@ if __name__ == '__main__':
 
         if args.test_on_train:
             val_data = loader.ISICDataset(
-                args.data_path + '/train', global_transform=test_transform,
+                args.data_path + '/train', global_transform=loader.PAD_TRANS_1024,
                 normalize=True
             )
         else:
             val_data = loader.ISICDataset(
-                args.data_path + '/test', global_transform=test_transform,
+                args.data_path + '/test', global_transform=loader.PAD_TRANS_1024,
                 normalize=True
             )
 
         val_loader = DataLoader(
-            val_data, shuffle=False, batch_size=1,#args.batch_size,
+            val_data, shuffle=False, batch_size=args.batch_size,
             num_workers=args.workers
         )
 
         down = [(5, 5, 5, 5), (5, 5, 5, 5), (5, 5, 5, 5), (5, 5, 5, 5)]
         up = [(5, 5, 5, 5), (5, 5, 5, 5), (5, 5, 5, 5)]
-        gate = functools.partial(d2.ScalarGate2d, mult=1)
         if args.model == 'baseline':
             down = [repr_to_n(d) for d in down]
             up = [repr_to_n(u) for u in up]
@@ -135,13 +118,7 @@ if __name__ == '__main__':
             )
         elif args.model == 'harmonic':
             network = HUnet(
-                in_features=3, down=down, up=up, size=5, radius=2, gate=gate,
-            )
-        elif args.model == 'dunet':
-            network = Dunet()
-        elif args.model == 'hunet2':
-            network = HUnet2(
-                in_features=3, down=down, up=up, size=7, radius=3, gate=gate
+                in_features=3, down=down, up=up, size=5, radius=2
             )
 
         cuda = torch.cuda.is_available()

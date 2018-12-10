@@ -95,6 +95,7 @@ class RandomCropTransform:
         
         return [img[:, sw:sw+self.w, sh:sh+self.h] for img in imgs]
 
+
 class CenterCropTransform(Lift):
     def __init__(self, target_size):
         self.w, self.h = target_size
@@ -117,6 +118,23 @@ class CenterCropTransform(Lift):
             return img
 
         super(CenterCropTransform, self).__init__(crop)
+
+
+class RandomRotate:
+    def __call__(self, *imgs):
+        angle = random.randint(-180, 180)
+
+        rotated = []
+        for img in imgs:
+            if img.mode == 'L':
+                rotated.append(img.rotate(angle, resample=Image.NEAREST))
+            elif img.mode == 'RGB':
+                rotated.append(img.rotate(angle, resample=Image.BICUBIC))
+            else:
+                raise ValueError("Encountered unsupported mode `{}`".format(img.mode))
+
+        return rotated
+
 
 class Normalize:
     def __init__(self, r=(180., 39.), g=(151., 41.48), b=(139., 45.18)):
