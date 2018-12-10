@@ -81,10 +81,6 @@ if __name__ == '__main__':
 
         train_data = loader.ISICDataset(
             args.data_path + '/train', global_transform=loader.ROTATE_TRANS_1024,
-            img_transform=T.Compose([
-                T.ColorJitter(0.1, 0.1, 0.1, hue=0.05),
-                T.ToTensor()
-            ]),
             normalize=True
         )
         train_loader = DataLoader(

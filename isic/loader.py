@@ -108,7 +108,6 @@ ROTATE_TRANS_1024 = tr.Compose([
 PAD_TRANS_1024 = tr.Compose([
     tr.AspectPreservingResizeTransform((1024, 768)),
     tr.Lift(T.Pad(88)),
-    tr.Lift(T.ToTensor())
 ])
 
 if __name__ == '__main__':
