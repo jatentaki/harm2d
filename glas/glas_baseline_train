@@ -1,0 +1,3 @@
+#!/usr/bin/env bash
+DATA=/cvlabdata2/cvlab/datasets_tyszkiewicz/glas
+python main.py $DATA artifacts_glas_baseline baseline train -b 2 -j 2 --bloat 750 --epochs 50 --lr 1e-3

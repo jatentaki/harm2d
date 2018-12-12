@@ -1,6 +1,8 @@
 import torch, os
-from utils import AvgMeter, open_file, print_dict, size_adaptive_, fmt_value
+import numpy as np
 from tqdm import tqdm
+
+from utils import AvgMeter, open_file, print_dict, maybe_make_dir
 
 def load_checkpoint(path):
     cp = torch.load(path)
@@ -104,6 +106,10 @@ def train(network, dataset, loss_fn, optimizer, epoch,
             if logger is not None:
                 logger.add_dict({'loss': loss_meter.last})
 
+    if logger is not None:
+        log_dict = {'loss': loss_meter.avg, 'epoch': epoch}
+        logger.add_msg(f'train: {log_dict}')
+
     return loss_meter.avg
 
 
@@ -146,10 +152,13 @@ def test(network, dataset, criteria, early_stop=None, logger=None, callbacks=[])
             if logger is not None:
                 logger.add_dict(criteria_dict)
 
-    means = print_dict({c.name: m.avg for c, m in zip(criteria, meters)})
-    print('Validation averages\n\t' + means)
+    means = {c.name: m.avg for c, m in zip(criteria, meters)}
+    for callback in callbacks:
+        means.update(callback.get_dict())
+
+    print('Validation averages\n\t' + print_dict(means))
     if logger is not None:
-        logger.add_msg('Validation averages' + means)
+        logger.add_msg(f'test: {means}')
     return meters[0].avg
 
 

@@ -24,7 +24,7 @@ class PrecRec(Criterion):
         else:
             prediction, target = args
 
-        sigmoids = torch.sigmoid(predictions)
+        sigmoids = torch.sigmoid(prediction)
         target = target.to(torch.uint8)
         for i, threshold in enumerate(self.thresholds):
             positive = sigmoids > threshold
@@ -72,6 +72,17 @@ class PrecRec(Criterion):
         f1 = 2 * prec * rec / (prec + rec)
         argmax = f1.argmax().item()
         return f1[argmax].item(), self.thresholds[argmax].item()
+
+    def get_dict(self):
+        iou, iou_t = self.best_iou()
+        f1, f1_t = self.best_f1()
+
+        return {
+            'f1': f1,
+            'f1_thres': f1_t,
+            'iou': iou,
+            'iou_thres': iou_t
+        }
 
 class ISICIoU(Criterion):
     def __init__(self, n_thresholds=10, masked=True):

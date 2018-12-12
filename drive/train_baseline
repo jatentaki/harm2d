@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+DATA=/cvlabdata2/cvlab/datasets_tyszkiewicz/drive
+python main.py $DATA artifacts_harmonic_f1 harmonic train -b 3 --bloat 750 --epochs 25 --lr 1e-2 --rot
+python main.py $DATA artifacts_baseline_f1 baseline train -b 3 --bloat 750 --epochs 25 --lr 1e-2 --rot

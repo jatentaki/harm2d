@@ -75,6 +75,8 @@ class DriveDataset:
     
     def __getitem__(self, idx):
         img, label = self.samples[idx]
+        img = img.clone()
+        label = label.clone()
         mask = Image.new('L', label.size, color=255)
  
         if self.global_transform:

@@ -8,12 +8,11 @@ import harmonic
 
 # parent directory
 sys.path.append('../')
-import framework
+import framework, hunet
 from losses import BCE
-from utils import size_adaptive_, maybe_make_dir, print_dict
+from utils import size_adaptive_, print_dict
 from criteria import PrecRec
 from reg_unet import Unet, repr_to_n
-from hunet import HUnet
 
 # `drive` directory
 import loader
@@ -115,8 +114,10 @@ if __name__ == '__main__':
 
         down = [(2, 3, 2), (4, 5, 4), (8, 10, 8)]
         up = [(4, 5, 4), (2, 3, 2)]
+#        down = [(2, 2, 4, 4), (8, 8, 8, 8), (16, 16, 16, 16)]
+#        up = [(8, 8, 8, 8), (2, 2, 4, 4)]
         if args.model == 'harmonic':
-            network = HUnet(in_features=3, down=down, up=up, radius=2)
+            network = hunet.HUnet(in_features=3, down=down, up=up, radius=2)
         elif args.model == 'baseline':
             down = [repr_to_n(d) for d in down]
             up = [repr_to_n(d) for d in up]
@@ -134,7 +135,7 @@ if __name__ == '__main__':
         loss_fn = size_adaptive_(BCE)()
         loss_fn.name = 'BCE'
 
-        optim = torch.optim.Adam([
+        optim = torch.optim.SGD([
             {'params': network.l2_params(), 'weight_decay': args.l2},
             {'params': network.nr_params(), 'weight_decay': 0.},
         ], lr=args.lr)
@@ -156,13 +157,6 @@ if __name__ == '__main__':
             fmt = 'Starting at epoch {}, best score {}. Loaded from {}'
             start_epoch += 1 # skip to the next after loaded
             msg = fmt.format(start_epoch, best_score, args.load)
-            print(msg)
-            for module in network.modules():
-                if hasattr(module, 'relax'):
-                    module.relax()
-                    print(f'relaxing {repr(module)}')
-
-            print(repr(network))
 
         if not args.load:
             print('Set start epoch and best score to 0')
@@ -178,8 +172,6 @@ if __name__ == '__main__':
             prec_rec = PrecRec()
             framework.test(network, val_loader, criteria,
                            logger=logger, callbacks=[prec_rec])
-            f1, thres = prec_rec.best_f1()
-            print('F1', f1, 'at', thres)
 
         elif args.action == 'train':
             scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
@@ -192,10 +184,13 @@ if __name__ == '__main__':
                     early_stop=args.early_stop, logger=logger
                 )
 
+                prec_rec = PrecRec(n_thresholds=100)
                 score = framework.test(
                     network, val_loader, criteria,
-                    early_stop=args.early_stop, logger=logger
+                    early_stop=args.early_stop, logger=logger,
+                    callbacks=[prec_rec]
                 )
+
                 scheduler.step(train_loss)
                 framework.save_checkpoint(
                     epoch, score, network, optim, path=args.artifacts
