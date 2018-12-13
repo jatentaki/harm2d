@@ -4,3 +4,4 @@ dataset/
 *.swp
 train
 *.npy
+*tfevents*
