@@ -32,6 +32,20 @@ class ResizeTransform(Lift):
 
         super(ResizeTransform, self).__init__(resize)
 
+class RandomFlip:
+    def __call__(self, *imgs):
+        flip_lr = random.randint(0, 1)
+        flip_td = random.randint(0, 1)
+
+        def do_flip(img):
+            if flip_lr == 1:
+                img = img.transpose(Image.FLIP_LEFT_RIGHT)
+            if flip_td == 1:
+                img = img.transpose(Image.FLIP_TOP_BOTTOM)
+            return img
+
+        return list(map(do_flip, imgs))
+
 
 class AspectPreservingResizeTransform(Lift):
     def __init__(self, target_size):

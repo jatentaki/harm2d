@@ -29,8 +29,6 @@ if __name__ == '__main__':
 
     parser.add_argument('-nj', '--no-jit', action='store_true',
                         help='disable jit compilation for the model')
-    parser.add_argument('--rot', action='store_true',
-                        help='augument input by rotations')
     parser.add_argument('--optimize', action='store_true',
                         help='run optimization pass in jit')
     parser.add_argument('-tot', '--test-on-train', action='store_true',
@@ -81,12 +79,11 @@ if __name__ == '__main__':
 
     test_global_transform = tr.Lift(T.Pad(40))
 
-    tr_global_transform = []
-    if args.rot:
-        tr_global_transform.append(tr.RandomRotate())
-    tr_global_transform.extend([
+    tr_global_transform = [
+        tr.RandomRotate(),
+        tr.RandomFlip(),
         tr.Lift(T.Pad(40))
-    ])
+    ]
     tr_global_transform = tr.Compose(tr_global_transform)
 
     train_data = loader.DriveDataset(
