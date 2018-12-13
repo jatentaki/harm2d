@@ -1,6 +1,7 @@
 import torch, os
 import numpy as np
 from tqdm import tqdm
+from torchvision.utils import make_grid
 
 from utils import AvgMeter, open_file, print_dict, maybe_make_dir
 
@@ -31,12 +32,13 @@ def save_checkpoint(epoch, score, model, optim, path=None, fname=None):
     fname = fname if fname else 'epoch{}.pth.tar'.format(epoch)
     torch.save(cp, path + os.path.sep + fname)
 
-def inspect(network, loader, path, early_stop=None, criteria=[]):
+def inspect(network, loader, path, early_stop=None):
     network.eval()
     path += os.path.sep       
     maybe_make_dir(path)
     
-    with tqdm(total=len(loader), dynamic_ncols=True) as progress, torch.no_grad():
+    progress = tqdm(total=len(loader), dynamic_ncols=True)
+    with progress, torch.no_grad():
         for i, args in enumerate(loader):
             if i == early_stop:
                 break
@@ -53,7 +55,7 @@ def inspect(network, loader, path, early_stop=None, criteria=[]):
             hm_path = directory + os.path.sep + 'heatmap.npy'                     
             maybe_make_dir(hm_path, silent=True)          
             np.save(hm_path, heatmap)
-                      
+
             # image 
             image = input.cpu()[0].numpy().transpose(1, 2, 0)
             np.save(directory + os.path.sep + 'image.npy', image)
@@ -65,10 +67,10 @@ def inspect(network, loader, path, early_stop=None, criteria=[]):
             progress.update(1) 
 
 
-def train(network, dataset, loss_fn, optimizer, epoch,
-          early_stop=None, logger=None, batch_multiplier=1):
+def train(network, dataset, loss_fn, optimizer, epoch, writer,
+          early_stop=None, batch_multiplier=1):
 
-    def optimization_step(i, *args):
+    def optimization_step(i, *args, save=False):
         if i % batch_multiplier == 0:
             optimizer.zero_grad()
 
@@ -82,48 +84,39 @@ def train(network, dataset, loss_fn, optimizer, epoch,
         if (i+1) % batch_multiplier == 0:
             optimizer.step()
 
+        if save:
+            pred = torch.sigmoid(prediction)
+            writer.add_image('Train/prediction', make_grid(pred), epoch)
+            writer.add_image('Train/image', make_grid(args[0]), epoch)
+
         return loss
 
     loss_meter = AvgMeter()
     network.train()
-    msg = 'Train epoch {}'.format(epoch)
-    print(msg)
-    if logger is not None:
-        logger.add_msg(msg)
 
-    with tqdm(total=len(dataset), dynamic_ncols=True) as progress:
+    progress = tqdm(total=len(dataset), dynamic_ncols=True)
+    with progress:
         for i, args in enumerate(dataset):
             if i == early_stop:
                 break
 
-            loss = optimization_step(i, *args)
+            loss = optimization_step(i, *args, save=i == 0)
 
-            loss_meter.update(loss.item())
-
+            writer.add_scalar('Train/loss', loss.item(), epoch)
             progress.update(1)
+            loss_meter.update(loss.item())
             progress.set_postfix(loss=loss_meter.last, mean=loss_meter.avg)
 
-            if logger is not None:
-                logger.add_dict({'loss': loss_meter.last})
-
-    if logger is not None:
-        log_dict = {'loss': loss_meter.avg, 'epoch': epoch}
-        logger.add_msg(f'train: {log_dict}')
-
+    writer.add_scalar('Train/loss_mean', loss_meter.avg, epoch)
     return loss_meter.avg
 
 
-def test(network, dataset, criteria, early_stop=None, logger=None, callbacks=[]):
-    if criteria == []:
-        raise ValueError("Empty criterion list")
-
+def test(network, dataset, loss_fn, criteria, epoch, writer, early_stop=None):
     network.eval()
-    meters = [AvgMeter() for c in criteria]
+    loss_meter = AvgMeter()
 
-    if logger is not None:
-        logger.add_msg('Validation')
-
-    with tqdm(total=len(dataset), dynamic_ncols=True) as progress, torch.no_grad():
+    progress = tqdm(total=len(dataset), dynamic_ncols=True)
+    with progress, torch.no_grad():
         for i, args in enumerate(dataset):
             if i == early_stop:
                 break
@@ -132,75 +125,21 @@ def test(network, dataset, criteria, early_stop=None, logger=None, callbacks=[])
                 args = [a.cuda() for a in args]
 
             prediction = network(args[0])
+            loss = loss_fn(prediction, *args[1:]).item()
 
-            for callback in callbacks:
-                callback(prediction, *args[1:])
+            loss_meter.update(loss)
 
-            for criterion, meter in zip(criteria, meters):
-                perf = criterion(prediction, *args[1:])
-                if isinstance(perf, torch.Tensor):
-                    meter.update(perf.item())
-                else:
-                    meter.update(perf)
-
+            writer.add_scalar('Test/loss', loss, epoch)
+            for criterion in criteria:
+                value = criterion(prediction, *args[1:])
+                writer.add_scalar(f'Test/{criterion.name}', value.item(), epoch)
             progress.update(1)
 
-            criteria_dict = {
-                c.name: m.last for c, m in zip(criteria, meters)
-            }
+    pred = torch.sigmoid(prediction)
+    writer.add_image('Test/prediction', make_grid(pred), epoch)
+    writer.add_image('Test/image', make_grid(args[0]), epoch)
 
-            if logger is not None:
-                logger.add_dict(criteria_dict)
+#    grid = make_grid(torch.sigmoid(prediction))
+#    writer.add_image('Test/image', grid, epoch)
 
-    means = {c.name: m.avg for c, m in zip(criteria, meters)}
-    for callback in callbacks:
-        means.update(callback.get_dict())
-
-    print('Validation averages\n\t' + print_dict(means))
-    if logger is not None:
-        logger.add_msg(f'test: {means}')
-    return meters[0].avg
-
-
-class Logger:
-    def __init__(self, path):
-        self.path = path
-        self.file = None
-
-
-    def __enter__(self):
-        self.open()
-        return self
-
-
-    def __exit__(self, *errs):
-        self.close()
-    
-
-    def open(self):
-        # find a unique log name
-        i = 0
-        while True:
-            proposed_name = self.path + str(i) + '.log'
-            if os.path.isfile(proposed_name):
-                print('Found previous log', proposed_name)
-                i += 1
-            else:
-                break
-            
-        self.path = proposed_name
-        self.file = open_file(self.path, 'w', buffering=512)
-        print('Logging to', self.path)
-
-
-    def close(self):
-        self.file.close()
-        self.file = None
-
-
-    def add_msg(self, msg):
-        self.file.write(msg + '\n')
-
-
-    def add_dict(self, dict_):
-        self.add_msg(print_dict(dict_, prec=6))
+    writer.add_scalar('Test/loss_mean', loss_meter.avg, epoch)

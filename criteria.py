@@ -9,8 +9,12 @@ class Criterion(nn.Module):
 
 class PrecRec(Criterion):
     def __init__(self, n_thresholds=10, masked=True):
+        self.name = 'Precision recall'
         self.n_thresholds = n_thresholds
-        self.thresholds = torch.linspace(0, 1, n_thresholds + 2)[1:-1].cuda()
+        self.thresholds = torch.linspace(0, 1, n_thresholds + 2)[1:-1]
+        if torch.cuda.is_available():
+            self.thresholds = self.thresholds.cuda()
+
         self.classes = torch.zeros(4, n_thresholds, dtype=torch.int64)
         self.masked = masked
 
@@ -40,6 +44,11 @@ class PrecRec(Criterion):
             )
             
             self.classes[:, i] += results
+
+        return torch.tensor(0.)
+
+    def reset(self):
+        self.classes[:] = 0
 
     def tp(self):
         return self.classes[0].float()
