@@ -1,3 +1,4 @@
 #!/usr/bin/env bash
 DATA=/cvlabdata2/cvlab/datasets_tyszkiewicz/drive
-python main.py $DATA artifacts_harmonic_flips harmonic train -b 3 --bloat 750 --epochs 50 --lr 1e-2 --optimize
+python main.py $DATA artifacts_harmonic_big_dropout_0_1 harmonic train -b 3 --bloat 750 --epochs 50 --lr 1e-2 --optimize
+python main.py $DATA artifacts_harmonic_big_dropout_0_3 harmonic train -b 3 --bloat 750 --epochs 50 --lr 1e-2 --dropout 0.3 --optimize

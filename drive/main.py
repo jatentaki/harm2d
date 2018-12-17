@@ -37,6 +37,8 @@ if __name__ == '__main__':
                         help='Process N times the dataset per epoch')
     parser.add_argument('--cut', metavar='N', default=None, type=int,
                         help='restrict training set size by N examples')
+    parser.add_argument('--dropout', metavar='F', default=0.1, type=float,
+                        help='Dropout probability')
     parser.add_argument('--load', metavar='FILE', default=None, type=str,
                         help='load an existing model')
     parser.add_argument('-j', '--workers', metavar='N', default=1, type=int,
@@ -112,12 +114,14 @@ if __name__ == '__main__':
         val_data, batch_size=args.batch_size, shuffle=False, num_workers=args.workers
     )
 
-    down = [(2, 3, 2), (4, 5, 4), (8, 10, 8)]
-    up = [(4, 5, 4), (2, 3, 2)]
-#        down = [(2, 2, 4, 4), (8, 8, 8, 8), (16, 16, 16, 16)]
-#        up = [(8, 8, 8, 8), (2, 2, 4, 4)]
+#    down = [(2, 3, 2), (4, 5, 4), (8, 10, 8)]
+#    up = [(4, 5, 4), (2, 3, 2)]
+    down = [(4, 5, 4), (7, 8, 7), (12, 16, 12)]
+    up = [(7, 8, 7), (4, 5, 4)]
     if args.model == 'harmonic':
-        network = hunet.HUnet(in_features=3, down=down, up=up, radius=2)
+        dropout = functools.partial(harmonic.d2.Dropout2d, p=args.dropout)
+        setup = {**hunet.default_setup, 'dropout': dropout}
+        network = hunet.HUnet(in_features=3, down=down, up=up, radius=2, setup=setup)
     elif args.model == 'baseline':
         down = [repr_to_n(d) for d in down]
         up = [repr_to_n(d) for d in up]

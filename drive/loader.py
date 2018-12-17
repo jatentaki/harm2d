@@ -4,21 +4,6 @@ import torchvision.transforms as T
 from itertools import cycle, islice
 from PIL import Image
 
-class RandomRotate:
-    def __call__(self, *imgs):
-        angle = random.randint(-180, 180)
-
-        rotated = []
-        for img in imgs:
-            if img.mode == 'L':
-                rotated.append(img.rotate(angle, resample=Image.NEAREST))
-            elif img.mode == 'RGB':
-                rotated.append(img.rotate(angle, resample=Image.BICUBIC))
-            else:
-                raise ValueError("Encountered unsupported mode `{}`".format(img.mode))
-
-        return rotated
-
 class DriveDataset:
     def __init__(self, path, training=True, img_transform=T.ToTensor(),
                  mask_transform=T.ToTensor(), label_transform=T.ToTensor(),

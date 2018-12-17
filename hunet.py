@@ -32,12 +32,19 @@ class TrivialDownsample(nn.Module):
     def forward(self, x):
         return d2.avg_pool2d(x, 2)
 
+class NoOp(nn.Module):
+    def __init__(self, *args, **kwargs):
+        super(NoOp, self).__init__()
+
+    def forward(self, x):
+        return x
 
 default_setup = {
     'gate': d2.ScalarGate2d,
     'norm': d2.InstanceNorm2d,
     'upsample': TrivialUpsample,
-    'downsample': TrivialDownsample
+    'downsample': TrivialDownsample,
+    'dropout': NoOp,
 }
 
 
@@ -45,9 +52,10 @@ class Conv(nn.Sequential):
     def __init__(self, repr_in, repr_out, size, radius=None, setup=default_setup):
         norm = setup['norm'](repr_in)
         nonl = setup['gate'](repr_in)
+        dropout = setup['dropout']()
         conv = d2.HConv2d(repr_in, repr_out, size, radius=radius)
 
-        super(Conv, self).__init__(norm, nonl, conv)
+        super(Conv, self).__init__(norm, nonl, dropout, conv)
 
 
 class Upsample(nn.Sequential):
