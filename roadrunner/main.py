@@ -97,7 +97,7 @@ if __name__ == '__main__':
 
     if args.model == 'harmonic':
 #        dropout = functools.partial(harmonic.d2.Dropout2d, p=args.dropout)
-#        setup = {**hunet.default_setup, 'dropout': dropout}
+        setup = {**hunet.default_setup, 'norm': harmonic.d2.GroupNorm2d}
         network = hunet.HUnet(in_features=3, down=down, up=up, radius=2)
     elif args.model == 'baseline':
         down = [repr_to_n(d) for d in down]

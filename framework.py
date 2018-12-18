@@ -3,7 +3,7 @@ import numpy as np
 from tqdm import tqdm
 from torchvision.utils import make_grid
 
-from utils import AvgMeter, open_file, print_dict, maybe_make_dir
+from utils import AvgMeter, open_file, print_dict, maybe_make_dir, cut_to_match
 
 def load_checkpoint(path):
     cp = torch.load(path)
@@ -86,8 +86,11 @@ def train(network, dataset, loss_fn, optimizer, epoch, writer,
 
         if save:
             pred = torch.sigmoid(prediction)
+            data = cut_to_match(pred, args[0])
+            gt = cut_to_match(pred, args[2])
             writer.add_image('Train/prediction', make_grid(pred), epoch)
-            writer.add_image('Train/image', make_grid(args[0]), epoch)
+            writer.add_image('Train/image', make_grid(data), epoch)
+            writer.add_image('Train/ground_truth', make_grid(gt), epoch)
 
         return loss
 
@@ -136,10 +139,10 @@ def test(network, dataset, loss_fn, criteria, epoch, writer, early_stop=None):
             progress.update(1)
 
     pred = torch.sigmoid(prediction)
+    data = cut_to_match(pred, args[0])
+    gt = cut_to_match(pred, args[2])
     writer.add_image('Test/prediction', make_grid(pred), epoch)
-    writer.add_image('Test/image', make_grid(args[0]), epoch)
-
-#    grid = make_grid(torch.sigmoid(prediction))
-#    writer.add_image('Test/image', grid, epoch)
+    writer.add_image('Test/image', make_grid(data), epoch)
+    writer.add_image('Test/ground_truth', make_grid(gt), epoch)
 
     writer.add_scalar('Test/loss_mean', loss_meter.avg, epoch)
