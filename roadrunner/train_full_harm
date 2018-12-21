@@ -1,2 +1,2 @@
 #! /usr/bin/env bash
-python main.py /cvlabdata2/cvlab/datasets_tyszkiewicz/deepglobe/train artifacts_deepglobe_gnorm harmonic train --lr 1e-2 -b 5 -j 6 --epochs 20 --optimize
+python main.py /cvlabdata2/cvlab/datasets_tyszkiewicz/deepglobe/train artifacts_deepglobe_gnorm_parallel_long harmonic train --lr 1e-2 -b 12 -j 12 --epochs 50 --parallel -nj

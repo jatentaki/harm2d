@@ -30,6 +30,8 @@ if __name__ == '__main__':
 
     parser.add_argument('-nj', '--no-jit', action='store_true',
                         help='disable jit compilation for the model')
+    parser.add_argument('--parallel', action='store_true',
+                        help='enable multi-gpu parallelization via nn.DataParallel')
     parser.add_argument('--optimize', action='store_true',
                         help='run optimization pass in jit')
     parser.add_argument('-tot', '--test-on-train', action='store_true',
@@ -113,16 +115,19 @@ if __name__ == '__main__':
     if cuda:
         network = network.cuda()
 
+    if args.parallel:
+        network = torch.nn.DataParallel(network)
+
     loss_fn = size_adaptive_(BCE)()
     loss_fn.name = 'BCE'
 
     optim = torch.optim.Adam([
-        {'params': network.l2_params(), 'weight_decay': args.l2},
-        {'params': network.nr_params(), 'weight_decay': 0.},
+        {'params': network.module.l2_params(), 'weight_decay': args.l2},
+        {'params': network.module.nr_params(), 'weight_decay': 0.},
     ], lr=args.lr)
 
     if not args.no_jit:
-        example = next(iter(train_loader))[0][0:1].cuda()
+        example = next(iter(train_loader))[0].cuda()
         network = torch.jit.trace(
             network, example, check_trace=True, optimize=args.optimize
         )
@@ -153,7 +158,7 @@ if __name__ == '__main__':
 
     elif args.action == 'train':
         scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
-            optim, 'min', patience=2, verbose=True, cooldown=1
+            optim, 'min', patience=2, verbose=True, cooldown=0
         )
 
         for epoch in range(start_epoch, args.epochs):
