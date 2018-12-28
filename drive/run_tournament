@@ -1,0 +1,3 @@
+#!/usr/bin/env bash
+DATA=/cvlabdata2/cvlab/datasets_tyszkiewicz/drive
+python tournament.py $DATA artifacts_tournament -b 3 --bloat 250 --epochs 2 --lr 1e-2 --optimize --num-contestants 10 --num-round 5
