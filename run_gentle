@@ -1,5 +1,6 @@
 #!/usr/bin/env python
 import subprocess, sys, os, platform, getpass, time, datetime, psutil, signal
+from subprocess import PIPE
 
 KILL_DIR = '/cvlabdata2/gentleHijacker/processes2kill'
 STEP_S = 5

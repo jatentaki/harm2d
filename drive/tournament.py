@@ -9,12 +9,14 @@ import transforms as tr
 
 # `drive` directory
 import loader
+from genetic_runner import Experiment
 
 class Tournament:
     def __init__(self, args):
-        #self.train_loader, self.val_loader = self.build_loaders(args)
+        self.train_loader, self.test_loader = self.build_loaders(args)
         self.args = args
         self.artifacts = args.artifacts
+        self.layers = 50
 
         if not os.path.isdir(self.artifacts):
             os.makedirs(self.artifacts)
@@ -28,6 +30,7 @@ class Tournament:
 
     def log(self, msg):
         self.file.write(f'{msg}\n')
+        print(f'LOG: {msg}')
         self.file.flush()
 
     def play(self):
@@ -46,18 +49,19 @@ class Tournament:
 
     def crossover(self, mother, father):
         child_bins = mother.bins + father.bins
-        return Setup(child_bins, total=mother.total)
+        return Setup(child_bins, layers=self.layers)
 
     def mate(self, phenotypes, evaluations):
         evaluations = np.array(evaluations)
-        eval_norm = evaluations / evaluations.sum()
+        diffs = evaluations - evaluations.min()
+        eval_norm = diffs / diffs.sum()
 
-        size = evaluations.size
-        mothers = np.random.choice(size, size, p=eval_norm)
-        fathers = np.random.choice(size, size, p=eval_norm)
+        size = evaluations.size // 2
+        mothers = np.random.choice(evaluations.size, size, p=eval_norm)
+        fathers = np.random.choice(evaluations.size, size, p=eval_norm)
 
-        m_hist, _ = np.histogram(mothers, bins=size, range=(0, size))
-        f_hist, _ = np.histogram(fathers, bins=size, range=(0, size))       
+        m_hist, _ = np.histogram(mothers, bins=evaluations.size, range=(0, size))
+        f_hist, _ = np.histogram(fathers, bins=evaluations.size, range=(0, size))       
         hist = m_hist + f_hist
 
         eval_hist = np.stack([evaluations, hist], axis=1)
@@ -69,28 +73,34 @@ class Tournament:
             child = self.crossover(phenotypes[mother], phenotypes[father])
             new_population.append(child)
 
+        i = 0
+        while len(new_population) < evaluations.size:
+            new_population.append(self.random_setup())
+            i += 1
+
+        self.log(f'{i} new contestants added')
+
         return new_population
 
     def random_setup(self):
         n_bins = 5 * 3
         bins = np.zeros(n_bins, dtype=np.float32)
 
-        for i in range(110):
+        for i in range(self.layers):
             choice = random.randint(0, n_bins-1)
             bins[choice] += 1
 
-        return Setup(bins)
+        return Setup(bins, layers=self.layers)
 
     def initialize_pool(self, n):
         return [self.random_setup() for _ in range(n)]
 
     def evaluate(self, setup, artifacts):
-#        experiment = Experiment(
-#            setup, self.train_loader, self.test_loader, artifacts, self.args
-#        )
+        experiment = Experiment(
+            setup, self.train_loader, self.test_loader, artifacts, self.args
+        )
         try:
-            score = random.random()
-            #experiment.train()
+            score = experiment.train()
         except Exception as e:
             self.log(f'Error while evaluating {setup}: {e}')
             score = 0.
@@ -118,6 +128,7 @@ class Tournament:
             img_transform=transform, mask_transform=transform,
             label_transform=transform, global_transform=tr_global_transform
         )
+
         train_loader = DataLoader(
             train_data, batch_size=args.batch_size, shuffle=True, num_workers=args.workers
         )
@@ -128,31 +139,43 @@ class Tournament:
             global_transform=test_global_transform
         )
 
-        val_loader = DataLoader(
+        test_loader = DataLoader(
             val_data, batch_size=args.batch_size, shuffle=False, num_workers=args.workers
         )
 
-        return train_loader, val_loader
+        return train_loader, test_loader
 
 class Setup:
-    def __init__(self, bins, total=110):
-        self.bins  = bins / bins.sum()
-        self.total = total
+    def __init__(self, bins, layers=100):
+        self.layers = layers 
         self.score = None
 
-    def round(self):
-        return (self.bins * self.total).astype(np.int64).tolist()
+        bins = np.array(bins, dtype=np.float32)
+        bins = np.ceil(bins / bins.sum() * layers).astype(np.int64)
+
+        while bins.sum() > layers:
+            ix = random.randint(0, bins.size - 1)
+            if bins[ix] > 0:
+                bins[ix] -= 1
+
+        self.bins = bins.tolist()
+        assert sum(self.bins) == layers
 
     @property
     def down(self):
-        bins = self.round()
-        down = [bins[0:3], bins[3:6], bins[6:9]]
+        down = [
+            self.bins[0:3],
+            self.bins[3:6],
+            self.bins[6:9]
+        ]
         return down
 
     @property
     def up(self):
-        bins = self.round()
-        up   = [bins[9:12], bins[12:15]]
+        up = [
+            self.bins[9:12],
+            self.bins[12:15]
+        ]
         return up
 
     def __str__(self):
