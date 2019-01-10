@@ -53,6 +53,8 @@ if __name__ == '__main__':
                         help='number of epochs to train for')
     parser.add_argument('-s', '--early_stop', default=None, type=int,
                         help='stop early after n batches')
+    parser.add_argument('--logdir', default=None, type=str,
+                        help='TensorboardX log directory')
 
     args = parser.parse_args()
 
@@ -60,7 +62,7 @@ if __name__ == '__main__':
         print('creating artifacts directory', args.artifacts)
         os.makedirs(args.artifacts)
 
-    writer = SummaryWriter()
+    writer = SummaryWriter(args.logdir)
 
     if args.action == 'inspect' and args.batch_size != 1:
         args.batch_size = 1
@@ -114,10 +116,12 @@ if __name__ == '__main__':
         val_data, batch_size=args.batch_size, shuffle=False, num_workers=args.workers
     )
 
+    down = [(4, 4), (8, 8), (16, 16)]
+    up = [(8, 8), (4, 4)]
+#    down = [(2, 2, 2, 2), (4, 4, 4, 4), (8, 8, 8, 8)]
+#    up = [(4, 4, 4, 4), (2, 2, 2, 2)]
 #    down = [(2, 3, 2), (4, 5, 4), (8, 10, 8)]
 #    up = [(4, 5, 4), (2, 3, 2)]
-    down = [(4, 5, 4), (7, 8, 7), (12, 16, 12)]
-    up = [(7, 8, 7), (4, 5, 4)]
     if args.model == 'harmonic':
         dropout = functools.partial(harmonic.d2.Dropout2d, p=args.dropout)
         setup = {**hunet.default_setup, 'dropout': dropout}
