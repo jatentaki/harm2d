@@ -1,20 +1,49 @@
 import torch, itertools
+import numpy as np
 import torch.nn as nn
 import torch.nn.functional as F
 
-from torch_localize import localized_module
+from torch_localize import localized_module, localized
+from torch_dimcheck import dimchecked
 
-from utils import cut_to_match, upsample
+from utils import cut_to_match
 
 
 def size_is_pow2(t):
     ''' Check if the trailing spatial dimensions are powers of 2 '''
-    return all(s % 2 == 0 for s in t.size()[2:])
+    return all(s % 2 == 0 for s in t.size()[-2:])
 
 
-class AttentionGate(nn.Module):
+class TrivialUpsample(nn.Module):
+    def __init__(self, *args, **kwargs):
+        super(TrivialUpsample, self).__init__()
+
+    def forward(self, x):
+        r = F.interpolate(
+            x, scale_factor=2, mode='bilinear', align_corners=False
+        )
+        return r
+
+
+class TrivialDownsample(nn.Module):
+    def __init__(self, *args, **kwargs):
+        super(TrivialDownsample, self).__init__()
+
+    def forward(self, x):
+        return F.avg_pool2d(x, 2)
+
+
+class NoOp(nn.Module):
+    def __init__(self, *args, **kwargs):
+        super(NoOp, self).__init__()
+
+    def forward(self, x):
+        return x
+
+
+class ScalarGate(nn.Module):
     def __init__(self, n_features, mult=1):
-        super(AttentionGate, self).__init__()
+        super(ScalarGate, self).__init__()
         self.n_features = n_features
         self.mult = mult
     
@@ -37,95 +66,139 @@ class AttentionGate(nn.Module):
         return g * inp
 
 
-class NormalizedConv2(nn.Module):
-    def __init__(self, in_, out_, size=5, **kwargs):
-        super(NormalizedConv2, self).__init__()
+default_setup = {
+    'gate': ScalarGate,
+    'norm': nn.InstanceNorm2d,
+    'upsample': TrivialUpsample,
+    'downsample': TrivialDownsample,
+    'dropout': NoOp,
+}
 
-        self.normalization = nn.BatchNorm2d(in_, track_running_stats=False)
-        self.conv = nn.Conv2d(
-            in_, out_, size, bias=True, **kwargs
+
+class Conv(nn.Sequential):
+    def __init__(self, in_, out_, size, setup=default_setup):
+        norm = setup['norm'](in_)
+        nonl = setup['gate'](in_)
+        dropout = setup['dropout']()
+        conv = nn.Conv2d(in_, out_, size)
+
+        super(Conv, self).__init__(norm, nonl, dropout, conv)
+
+
+class Upsample(nn.Sequential):
+    def __init__(self, n_features, size, setup=default_setup):
+        conv_kwargs = {
+            'stride': 2,
+            'output_padding': 1
+        }
+        norm = setup['norm'](n_features)
+        nonl = setup['gate'](n_features)
+        conv = nn.ConvTranspose2d(
+            n_features, n_features, size, conv_kwargs=conv_kwargs
         )
 
-    def forward(self, y):
-        y = self.normalization(y)
-        y = self.conv(y)
-
-        return y
+        super(Upsample, self).__init__(norm, nonl, conv)
 
 
-@localized_module
-class UnetDownBlock(nn.Module):
-    def __init__(self, in_, out_, size=5, first_norm=True, **kwargs):
-        super(UnetDownBlock, self).__init__()
+class Downsample(nn.Sequential):
+    def __init__(self, n_features, size, setup=default_setup):
 
+        conv_kwargs = {
+            'stride': 2,
+            'padding': size // 2
+        }
+        norm = setup['norm'](n_features)
+        nonl = setup['gate'](n_features)
+        conv = nn.Conv2d(
+            n_features, n_features, size, conv_kwargs=conv_kwargs
+        )
+
+        super(Downsample, self).__init__(norm, nonl, conv)
+
+
+class FirstDownBlock(nn.Sequential):
+    def __init__(self, in_, out_, size=5, name=None,
+                 setup=default_setup):
+
+        self.name = name
+        self.in_ = in_
+        self.out_ = out_
+
+        conv1 = nn.Conv2d(in_, out_, size)
+        conv2 = Conv(out_, out_, size, setup=setup)
+ 
+        super(FirstDownBlock, self).__init__(conv1, conv2)
+
+
+class UnetDownBlock(nn.Sequential):
+    def __init__(self, in_, out_, size=5, name=None,
+                 setup=default_setup):
+
+        self.name = name
         self.in_ = in_
         self.out_ = out_
         
-        if first_norm:
-            self.conv1 = NormalizedConv2(in_, out_, size=size, **kwargs)
-        else:
-            self.conv1 = nn.Conv2d(in_, out_, size, **kwargs)
+        downsample = setup['downsample'](in_, size, setup=setup)
+        conv1 = Conv(in_, out_, size, setup=setup)
+        conv2 = Conv(out_, out_, size, setup=setup)
 
-        self.nonl1 = AttentionGate(out_)
-
-        self.conv2 = NormalizedConv2(out_, out_, size=size, **kwargs)
-        self.nonl2 = AttentionGate(out_)
-    
-
-    def forward(self, y):
-        y = self.conv1(y)
-        y = self.nonl1(y)
-        y = self.conv2(y)
-        y_gated = self.nonl2(y)
-
-        return y_gated, y
+        super(UnetDownBlock, self).__init__(downsample, conv1, conv2)
 
 
-@localized_module
+    @localized
+    @dimchecked
+    def forward(self, x: ['b', 'fi', 'hi', 'wi']
+               )     ->  ['b', 'fo', 'ho', 'wo']:
+
+        if not size_is_pow2(x):
+            msg = f"Trying to downsample feature map of size {x.size()}"
+            raise RuntimeError(msg)
+
+        return super(UnetDownBlock, self).forward(x)
+
+
 class UnetUpBlock(nn.Module):
-    def __init__(self, bottom, horizontal, out, size=5, **kwargs):
+    def __init__(self, bottom_, horizontal_, out_,
+                 size=5, name=None, setup=default_setup):
+
         super(UnetUpBlock, self).__init__()
 
-        self.bottom = bottom
-        self.horizontal = horizontal
-        self.cat = bottom + horizontal
-        self.out = out
+        self.name = name
+        self.bottom_ = bottom_
+        self.horizontal_ = horizontal_
+        self.cat_ = bottom_ + horizontal_
+        self.out_ = out_
 
-        self.nonl1 = AttentionGate(self.cat)
-        self.conv1 = NormalizedConv2(self.cat, self.cat, size, **kwargs)
+        self.upsample = setup['upsample'](bottom_, size, setup=setup)
 
-        self.nonl2 = AttentionGate(self.cat)
-        self.conv2 = NormalizedConv2(self.cat, self.out, size, **kwargs)
-
-
-    def forward(self, bottom, horizontal):
-        horizontal = cut_to_match(bottom, horizontal)
-        y = torch.cat([bottom, horizontal], dim=1)
-        y = self.nonl1(y)
-        y = self.conv1(y)
-        y = self.nonl2(y)
-        y = self.conv2(y)
-
-        return y
+        conv1 = Conv(self.cat_, self.cat_, size, setup=setup)
+        conv2 = Conv(self.cat_, self.out_, size, setup=setup,)
+        self.seq = nn.Sequential(conv1, conv2)
 
 
-unet_default_down = [16, 32, 64]
-unet_default_up = [32, 16]
+    @localized
+    @dimchecked
+    def forward(self, bot: ['b', 'fb', 'hb', 'wb'],
+                      hor: ['b', 'fh', 'hh', 'wh']
+               )        -> ['b', 'fo', 'ho', 'wo']:
 
-def repr_to_n(repr):
-    return 2 * sum(repr)
+
+        bot_big = self.upsample(bot)
+        hor = cut_to_match(bot_big, hor, n_pref=2)
+        combined = torch.cat([bot_big, hor], dim=1)
+
+        return self.seq(combined)
 
 
 @localized_module
 class Unet(nn.Module):
-    def __init__(self, in_features=1, out_features=1, up=unet_default_up,
-                 down=unet_default_down):
+    def __init__(self, in_features=1, out_features=1, up=None, down=None,
+                 size=5, setup=default_setup):
+
         super(Unet, self).__init__()
 
         if not len(down) == len(up) + 1:
-            fmt = "Wrong specification, len(down) == {}, len(up) == {}"
-            msg = fmt.format(len(down), len(up))
-            raise ValueError(msg)
+            raise ValueError("`down` must be 1 item longer than `up`")
 
         self.up = up
         self.down = down
@@ -135,10 +208,13 @@ class Unet(nn.Module):
         down_dims = [in_features] + down
         self.path_down = nn.ModuleList()
         for i, (d_in, d_out) in enumerate(zip(down_dims[:-1], down_dims[1:])):
-            first_norm = i != 0
+            if i == 0:
+                block_type = FirstDownBlock
+            else:
+                block_type = UnetDownBlock
 
-            block = UnetDownBlock(
-                d_in, d_out, name='down_{}'.format(i), first_norm=first_norm
+            block = block_type(
+                d_in, d_out, size=size, name=f'down_{i}', setup=setup
             )
             self.path_down.append(block)
 
@@ -146,10 +222,12 @@ class Unet(nn.Module):
         hor_dims = down_dims[-2::-1]
         self.path_up = nn.ModuleList()
         for i, (d_bot, d_hor, d_out) in enumerate(zip(bot_dims, hor_dims, up)):
-            block = UnetUpBlock(d_bot, d_hor, d_out, name='up_{}'.format(i))
+            block = UnetUpBlock(
+                d_bot, d_hor, d_out, size=size, name=f'up_{i}', setup=setup
+            )
             self.path_up.append(block)
 
-        self.logit_nonl = AttentionGate(up[-1])
+        self.logit_nonl = setup['gate'](up[-1])
         self.logit_conv = nn.Conv2d(up[-1], self.out_features, 1)
 
         self.n_params = 0
@@ -157,37 +235,37 @@ class Unet(nn.Module):
             self.n_params += param.numel()
 
 
-    def forward(self, inp):
-        features_gated = inp
-        features_down = []
+    @dimchecked
+    def forward(self, inp: ['b', 'fi', 'hi', 'wi']) -> ['b', 'fo', 'ho', 'wo']:
+        if inp.size(1) != self.in_features:
+            fmt = "Expected {} feature channels in input, got {}"
+            msg = fmt.format(self.in_features, inp.size(1))
+            raise ValueError(msg)
+
+        features = [inp]
         for i, layer in enumerate(self.path_down):
-            if i != 0:
-                if not size_is_pow2(features_gated):
-                    fmt = "Trying to downsampup[-1], of size {}"
-                    msg = fmt.format(features_gated.size())
-                    raise RuntimeError(msg)
+            features.append(layer(features[-1]))
 
-                features_gated = F.avg_pool2d(features_gated, 2)
+        f_bot = features[-1]
+        features_horizontal = features[-2::-1]
 
-            features_gated, features = layer(features_gated)
-            features_down.append(features)
-        
-        f_b = features_down[-1]
-        features_horizontal = features_down[-2::-1]
-        
-        for layer, f_h in zip(self.path_up, features_horizontal):
-            f_b = upsample(f_b, scale_factor=2)
-            f_b = layer(f_b, f_h)
+        for layer, f_hor in zip(self.path_up, features_horizontal):
+            f_bot = layer(f_bot, f_hor)
 
-        f_gated = self.logit_nonl(f_b)
+        f_gated = self.logit_nonl(f_bot)
         return self.logit_conv(f_gated)
 
+    @staticmethod
+    def is_regularized(param_name):
+        return not ('bias' in param_name or 'angular' in param_name)
+
     def l2_params(self):
-        return [p for n, p in self.named_parameters() if 'bias' not in n]
+        return [p for n, p in self.named_parameters() \
+                if HUnet.is_regularized(n)]
 
     def nr_params(self):
-        return [p for n, p in self.named_parameters() if 'bias' in n]
-
+        return [p for n, p in self.named_parameters() \
+                if not HUnet.is_regularized(n)]
 
 if __name__ == '__main__':
     import unittest
@@ -200,7 +278,7 @@ if __name__ == '__main__':
             self.assertEqual(torch.Size([2, 4, 24, 24]), output.size())
     
         def test_inequal_output_symmetric(self):
-            unet = Unet()
+            unet = Unet(down=[16, 32, 64], up=[40, 24])
             input = torch.zeros(2, 1, 104, 104)
             output = unet(input)
             self.assertEqual(torch.Size([2, 1, 24, 24]), output.size())
