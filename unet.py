@@ -9,6 +9,10 @@ from torch_dimcheck import dimchecked
 from utils import cut_to_match
 
 
+def repr_to_n(repr):
+    return 2 * sum(repr)
+
+
 def size_is_pow2(t):
     ''' Check if the trailing spatial dimensions are powers of 2 '''
     return all(s % 2 == 0 for s in t.size()[-2:])
@@ -257,15 +261,15 @@ class Unet(nn.Module):
 
     @staticmethod
     def is_regularized(param_name):
-        return not ('bias' in param_name or 'angular' in param_name)
+        return not 'bias' in param_name 
 
     def l2_params(self):
         return [p for n, p in self.named_parameters() \
-                if HUnet.is_regularized(n)]
+                if Unet.is_regularized(n)]
 
     def nr_params(self):
         return [p for n, p in self.named_parameters() \
-                if not HUnet.is_regularized(n)]
+                if not Unet.is_regularized(n)]
 
 if __name__ == '__main__':
     import unittest

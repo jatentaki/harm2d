@@ -10,11 +10,10 @@ import harmonic
 # parent directory
 sys.path.append('../')
 import transforms as tr
-import framework, hunet
+import framework, hunet, unet
 from losses import BCE
 from utils import size_adaptive_, print_dict
 from criteria import PrecRec
-from reg_unet import Unet, repr_to_n
 
 # `drive` directory
 import loader
@@ -116,20 +115,22 @@ if __name__ == '__main__':
         val_data, batch_size=args.batch_size, shuffle=False, num_workers=args.workers
     )
 
-    down = [(4, 4), (8, 8), (16, 16)]
-    up = [(8, 8), (4, 4)]
+#    down = [(4, 4), (8, 8), (16, 16)]
+#    up = [(8, 8), (4, 4)]
 #    down = [(2, 2, 2, 2), (4, 4, 4, 4), (8, 8, 8, 8)]
 #    up = [(4, 4, 4, 4), (2, 2, 2, 2)]
-#    down = [(2, 3, 2), (4, 5, 4), (8, 10, 8)]
-#    up = [(4, 5, 4), (2, 3, 2)]
+    down = [(2, 3, 2), (4, 5, 4), (8, 10, 8)]
+    up = [(4, 5, 4), (2, 3, 2)]
     if args.model == 'harmonic':
         dropout = functools.partial(harmonic.d2.Dropout2d, p=args.dropout)
         setup = {**hunet.default_setup, 'dropout': dropout}
         network = hunet.HUnet(in_features=3, down=down, up=up, radius=2, setup=setup)
     elif args.model == 'baseline':
-        down = [repr_to_n(d) for d in down]
-        up = [repr_to_n(d) for d in up]
-        network = Unet(up=up, down=down, in_features=3)
+        dropout = functools.partial(torch.nn.Dropout2d, p=args.dropout)
+        setup = {**unet.default_setup, 'dropout': dropout}
+        down = [unet.repr_to_n(d) for d in down]
+        up = [unet.repr_to_n(d) for d in up]
+        network = unet.Unet(up=up, down=down, in_features=3)#, setup=setup)
 
     cuda = torch.cuda.is_available()
 
