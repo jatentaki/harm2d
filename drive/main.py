@@ -12,7 +12,7 @@ sys.path.append('../')
 import transforms as tr
 import framework, hunet, unet
 from losses import BCE
-from utils import size_adaptive_, print_dict
+from utils import size_adaptive_
 from criteria import PrecRec
 
 # `drive` directory
@@ -83,8 +83,8 @@ if __name__ == '__main__':
     test_global_transform = tr.Lift(T.Pad(40))
 
     tr_global_transform = [
-        tr.RandomRotate(),
-        tr.RandomFlip(),
+#        tr.RandomRotate(),
+#        tr.RandomFlip(),
         tr.Lift(T.Pad(40))
     ]
     tr_global_transform = tr.Compose(tr_global_transform)
@@ -124,7 +124,7 @@ if __name__ == '__main__':
     if args.model == 'harmonic':
         dropout = functools.partial(harmonic.d2.Dropout2d, p=args.dropout)
         setup = {**hunet.default_setup, 'dropout': dropout}
-        network = hunet.HUnet(in_features=3, down=down, up=up, radius=2, setup=setup)
+        network = hunet.HUnet(in_features=3, down=down, up=up, radius=2)#, setup=setup)
     elif args.model == 'baseline':
         dropout = functools.partial(torch.nn.Dropout2d, p=args.dropout)
         setup = {**unet.default_setup, 'dropout': dropout}
@@ -137,6 +137,11 @@ if __name__ == '__main__':
     network_repr = str(network)
     print(network_repr)
     writer.add_text('general', network_repr)
+
+    n_params = 0
+    for param in network.parameters():
+        n_params += param.numel()
+    print(n_params, 'learnable parameters')
 
     if cuda:
         network = network.cuda()
@@ -163,7 +168,6 @@ if __name__ == '__main__':
         optim.load_state_dict(optim_dict)
         fmt = 'Starting at epoch {}, best score {}. Loaded from {}'
         start_epoch += 1 # skip to the next after loaded
-        msg = fmt.format(start_epoch, best_score, args.load)
 
     if not args.load:
         print('Set start epoch and best score to 0')
@@ -198,8 +202,6 @@ if __name__ == '__main__':
             f1, f1t = prec_rec.best_f1()
             iou, iout = prec_rec.best_iou()
 
-            writer.add_scalar('Test/f1', f1, epoch)
-            writer.add_scalar('Test/f1_thres', f1t, epoch)
             writer.add_scalar('Test/iou', iou, epoch)
             writer.add_scalar('Test/iou_thres', iout, epoch)
 

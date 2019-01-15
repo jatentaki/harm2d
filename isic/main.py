@@ -1,22 +1,21 @@
-import torch, argparse, functools, itertools, os, warnings, sys
+import torch, argparse, functools, itertools, os, sys
 import torch.nn.functional as F
 import torchvision.transforms as T
 import numpy as np
 from torch.utils.data import DataLoader
 from tqdm import tqdm
-import harmonic.d2 as d2
+from tensorboardX import SummaryWriter
+import harmonic
 
 # local directory
 import loader
 
 # parent directory
 sys.path.append('..')
-import losses, framework
+import losses, framework, hunet, unet
 import criteria as criteria_mod
-from utils import size_adaptive_, maybe_make_dir, print_dict
-from reg_unet import Unet, repr_to_n
-from hunet import HUnet
-from scheduler import MultiplicativeScheduler
+from utils import size_adaptive_
+from criteria import IsicPrecRec
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='PyTorch 2d segmentation')
@@ -50,12 +49,16 @@ if __name__ == '__main__':
                         help='learning rate (ADAM)')
     parser.add_argument('--epochs', metavar='N', default=10, type=int,
                         help='number of epochs to train for')
+    parser.add_argument('--dropout', metavar='F', default=None, type=float,
+                        help='Dropout probability')
 
     # other
     parser.add_argument('-s', '--early_stop', default=None, type=int,
                         help='stop early after n batches')
     parser.add_argument('-tot', '--test-on-train', action='store_true',
                         help='Run evaluation and inspection on training set')
+    parser.add_argument('--logdir', default=None, type=str,
+                        help='TensorboardX log directory')
 
     args = parser.parse_args()
     
@@ -63,162 +66,145 @@ if __name__ == '__main__':
         print('creating artifacts directory', args.artifacts)
         os.makedirs(args.artifacts)
 
-    with framework.Logger(args.artifacts + '/log') as logger:
-        if args.action == 'inspect' and args.batch_size != 1:
-            args.batch_size = 1
-            print("Setting --batch-size to 1 for inspection")
+    writer = SummaryWriter(args.logdir)
 
-        if args.action != 'train' and args.epochs is not None:
-            print("Ignoring --epochs outside of training mode")
+    if args.action == 'inspect' and args.batch_size != 1:
+        args.batch_size = 1
+        print("Setting --batch-size to 1 for inspection")
 
-        if args.no_jit and args.optimize:
-            print("Ignoring --optimize in --no-jit setting")
+    if args.action != 'train' and args.epochs is not None:
+        print("Ignoring --epochs outside of training mode")
 
-        logger.add_dict(vars(args))
+    if args.no_jit and args.optimize:
+        print("Ignoring --optimize in --no-jit setting")
 
-        warnings.simplefilter("ignore")
-        logger.add_msg('Ignoring warnings')
+    writer.add_text('general', str(vars(args)))
 
-        train_data = loader.ISICDataset(
-            args.data_path + '/train', global_transform=loader.ROTATE_TRANS_1024,
-            img_transform=T.Compose([
-                T.ColorJitter(0.1, 0.1, 0.1, 0.05),
-                T.ToTensor()
-            ]),
+    train_data = loader.ISICDataset(
+        args.data_path + '/train', global_transform=loader.ROTATE_TRANS_1024,
+        img_transform=T.Compose([
+            T.ColorJitter(0.1, 0.1, 0.1, 0.05),
+            T.ToTensor()
+        ]),
+        normalize=True
+    )
+    train_loader = DataLoader(
+        train_data, batch_size=args.batch_size, shuffle=True,
+        num_workers=args.workers
+    )
+
+    if args.test_on_train:
+        val_data = loader.ISICDataset(
+            args.data_path + '/train', global_transform=loader.PAD_TRANS_1024,
             normalize=True
         )
-        train_loader = DataLoader(
-            train_data, batch_size=args.batch_size, shuffle=True,
-            num_workers=args.workers
+    else:
+        val_data = loader.ISICDataset(
+            args.data_path + '/test', global_transform=loader.PAD_TRANS_1024,
+            normalize=True
         )
 
-        if args.test_on_train:
-            val_data = loader.ISICDataset(
-                args.data_path + '/train', global_transform=loader.PAD_TRANS_1024,
-                normalize=True
-            )
+    val_loader = DataLoader(
+        val_data, shuffle=False, batch_size=args.batch_size,
+        num_workers=args.workers
+    )
+
+    down = [(5, 5, 5), (5, 5, 5), (5, 5, 5), (5, 5, 5)]
+    up = [(5, 5, 5), (5, 5, 5), (5, 5, 5)]
+    if args.model == 'harmonic':
+        if args.dropout is not None:
+            dropout = functools.partial(harmonic.d2.Dropout2d, p=args.dropout)
+            setup = {**hunet.default_setup, 'dropout': dropout}
         else:
-            val_data = loader.ISICDataset(
-                args.data_path + '/test', global_transform=loader.PAD_TRANS_1024,
-                normalize=True
-            )
+            setup = hunet.default_setup
 
-        val_loader = DataLoader(
-            val_data, shuffle=False, batch_size=args.batch_size,
-            num_workers=args.workers
+        network = hunet.HUnet(in_features=3, down=down, up=up, radius=2, setup=setup)
+
+    elif args.model == 'baseline':
+        if args.dropout is not None:
+            dropout = functools.partial(torch.nn.Dropout2d, p=args.dropout)
+            setup = {**unet.default_setup, 'dropout': dropout}
+        else:
+            setup = unet.default_setup
+
+        down = [unet.repr_to_n(d) for d in down]
+        up = [unet.repr_to_n(d) for d in up]
+        network = unet.Unet(up=up, down=down, in_features=3, setup=setup)
+
+    cuda = torch.cuda.is_available()
+
+    network_repr = repr(network)
+    print(network_repr)
+    writer.add_text('general', network_repr)
+
+    n_params = 0
+    for param in network.parameters():
+        n_params += param.numel()
+    print(n_params, 'learnable parameters')
+
+    if cuda:
+        network = network.cuda()
+
+    loss_fn = size_adaptive_(losses.BCE)()
+    loss_fn.name = 'BCE'
+
+    optim = torch.optim.Adam([
+        {'params': network.l2_params(), 'weight_decay': args.l2},
+        {'params': network.nr_params(), 'weight_decay': 0.},
+    ], lr=args.lr)
+
+    if not args.no_jit:
+        example = next(iter(train_loader))[0][0:1].cuda()
+        network = torch.jit.trace(
+            network, example, check_trace=True, optimize=args.optimize
         )
 
-        down = [(5, 5, 5, 5), (5, 5, 5, 5), (5, 5, 5, 5), (5, 5, 5, 5)]
-        up = [(5, 5, 5, 5), (5, 5, 5, 5), (5, 5, 5, 5)]
-        if args.model == 'baseline':
-            down = [repr_to_n(d) for d in down]
-            up = [repr_to_n(u) for u in up]
-            network = Unet(
-                up=up, down=down, in_features=3
-            )
-        elif args.model == 'harmonic':
-            network = HUnet(
-                in_features=3, down=down, up=up, size=5, radius=2
-            )
+    if args.load:
+        checkpoint = framework.load_checkpoint(args.load)
+        start_epoch, best_score, model_dict, optim_dict = checkpoint
 
-        cuda = torch.cuda.is_available()
+        network.load_state_dict(model_dict)
+        optim.load_state_dict(optim_dict)
+        fmt = 'Starting at epoch {}, best score {}. Loaded from {}'
+        start_epoch += 1 # skip to the next after loaded
 
-        network_repr = repr(network)
-        logger.add_msg(network_repr)
-        print(network_repr)
-        n_params = 0
-        for param in network.parameters():
-            n_params += param.numel()
-        print(n_params, 'learnable parameters')
+    if not args.load:
+        print('Set start epoch and best score to 0')
+        best_score = 0.
+        start_epoch = 0
 
-        if cuda:
-            network = network.cuda()
+    if args.action == 'inspect':
+        framework.inspect(
+            network, val_loader, args.artifacts, early_stop=args.early_stop
+        )
+    elif args.action == 'evaluate':
+        prec_rec = IsicPrecRec()
+        framework.test(network, val_loader, loss_fn, [],
+                       logger=logger, callbacks=[prec_rec])
 
-        loss_fn = size_adaptive_(losses.BCE)()
-        loss_fn.name = 'BCE'
+    elif args.action == 'train':
+        scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+            optim, 'min', patience=2, verbose=True, cooldown=1
+        )
 
-        optim = torch.optim.Adam([
-            {'params': network.l2_params(), 'weight_decay': args.l2},
-            {'params': network.nr_params(), 'weight_decay': 0.},
-        ], lr=args.lr)
-
-        criteria = [loss_fn]
-
-        if args.load:
-            checkpoint = framework.load_checkpoint(args.load)
-            start_epoch, best_score, model_dict, optim_dict = checkpoint
-
-            network.load_state_dict(model_dict)
-            optim.load_state_dict(optim_dict)
-            fmt = 'Starting at epoch {}, best score {}. Loaded from {}'
-            start_epoch += 1 # skip to the next after loaded
-            msg = fmt.format(start_epoch, best_score, args.load)
-            print(msg)
-
-#            for module in network.modules():
-#                if hasattr(module, 'relax'):
-#                    module.relax()
-#                    print(f'relaxing {repr(module)}')
-#            print(repr(network))
-
-        if not args.load:
-            print('Set start epoch and best score to 0')
-            best_score = 0.
-            start_epoch = 0
-
-        if not args.no_jit:
-            example = next(iter(train_loader))[0][0:1].cuda()
-            network = torch.jit.trace(
-                network, example, check_trace=True, optimize=args.optimize
+        for epoch in range(start_epoch, args.epochs):
+            train_loss = framework.train(
+                network, train_loader, loss_fn, optim, epoch,
+                writer=writer, early_stop=args.early_stop
             )
 
-        if args.action == 'inspect':
-            framework.inspect(
-                network, val_loader, args.artifacts,
-                criteria=criteria, early_stop=args.early_stop
-            )
-        elif args.action == 'evaluate':
-            iou = criteria_mod.ISICIoU(n_thresholds=100)
-            callbacks = [iou]
+            prec_rec = IsicPrecRec(n_thresholds=100)
             framework.test(
-                network, val_loader, criteria, logger=logger,
-                callbacks=callbacks, early_stop=args.early_stop
-            )
-            best_iou, iou_thres = iou.best_iou()
-            print('IoU', best_iou, 'at', iou_thres)
-
-        elif args.action == 'train':
-            scheduler = MultiplicativeScheduler(
-                optim, 'min', patience=3, verbose=True, cooldown=0,
-                cmd_args=args, factor=0.2
+                network, val_loader, loss_fn, [prec_rec], epoch, writer=writer,
+                early_stop=args.early_stop,
             )
 
-            for epoch in range(start_epoch, args.epochs):
-                framework.train(
-                    network, train_loader, loss_fn, optim, epoch,
-                    early_stop=args.early_stop, logger=logger,
-                    batch_multiplier=args.batch_multiplier
-                )
+            results = prec_rec.get_dict()
+            for key in results:
+                writer.add_scalar(f'Test/{key}', results[key], epoch)
 
-                iou = criteria_mod.ISICIoU(n_thresholds=100)
-                callbacks = [iou]
-                score = framework.test(
-                    network, val_loader, criteria, callbacks=callbacks,
-                    early_stop=args.early_stop, logger=logger
-                )
-                best_iou, iou_thres = iou.best_iou()
-                iou_msg = f'best iou {best_iou} at {iou_thres}'
-                print(iou_msg)
-                logger.add_msg(iou_msg)
-                scheduler.step(score)
-                framework.save_checkpoint(
-                    epoch, score, network, optim, path=args.artifacts
-                )
+            scheduler.step(train_loss)
 
-                if score > best_score:
-                    best_score = score 
-                    fname = 'model_best_{:.2f}.pth.tar'.format(best_score)
-                    framework.save_checkpoint(
-                        epoch, best_score, network, optim,
-                        path=args.artifacts, fname=fname
-                    )
+            framework.save_checkpoint(
+                epoch, 0., network, optim, path=args.artifacts
+            )

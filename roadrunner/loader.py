@@ -7,13 +7,18 @@ from PIL import Image
 sys.path.append('..')
 import transforms as tr
 
-ROTATE_512 = tr.Compose([
-    tr.RandomRotate(),
-    tr.Lift(T.ToTensor()),
-    tr.RandomCropTransform((512, 512))
-])
+#ROTATE_512 = tr.Compose([
+#    tr.RandomRotate(),
+#    tr.Lift(T.ToTensor()),
+#    tr.RandomCropTransform((512, 512))
+#])
 
-CROP_512 = tr.Compose([
-    tr.Lift(T.ToTensor()),
-    tr.RandomCropTransform((512, 512)),
+#CROP_512 = tr.Compose([
+#    tr.Lift(T.ToTensor()),
+#    tr.RandomCropTransform((512, 512)),
+#])
+
+UNCUT = tr.Compose([
+#    tr.Lift(T.Pad(88)),
+    tr.Lift(T.ToTensor())
 ])

@@ -1,4 +1,4 @@
-import torch, argparse, functools, itertools, os, warnings, imageio, sys
+import torch, argparse, functools, itertools, os, sys
 import torch.nn.functional as F
 import torchvision.transforms as T
 import numpy as np
@@ -9,12 +9,10 @@ import harmonic
 
 # parent directory
 sys.path.append('../')
-import transforms as tr
-import framework, hunet
-from losses import BCE
-from utils import size_adaptive_, print_dict
+import losses, framework, hunet, unet
+import criteria as criteria_mod
+from utils import size_adaptive_
 from criteria import PrecRec
-from reg_unet import Unet, repr_to_n
 
 # `drive` directory
 import loader
@@ -22,21 +20,21 @@ from deepglobe_loader import DeepglobeDataset
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='PyTorch 2d segmentation')
+    # paths
     parser.add_argument('data_path', metavar='DIR', help='path to the dataset')
     parser.add_argument('artifacts', metavar='DIR', help='path to store artifacts')
 
+    # behaior choice
     parser.add_argument('model', choices=['harmonic', 'baseline'])
     parser.add_argument('action', choices=['train', 'evaluate', 'inspect'])
 
     parser.add_argument('-nj', '--no-jit', action='store_true',
                         help='disable jit compilation for the model')
-    parser.add_argument('--parallel', action='store_true',
-                        help='enable multi-gpu parallelization via nn.DataParallel')
     parser.add_argument('--optimize', action='store_true',
                         help='run optimization pass in jit')
     parser.add_argument('-tot', '--test-on-train', action='store_true',
                         help='Run evaluation and inspection on training set')
-    parser.add_argument('--dropout', metavar='F', default=0.1, type=float,
+    parser.add_argument('--dropout', metavar='F', default=None, type=float,
                         help='Dropout probability')
     parser.add_argument('--load', metavar='FILE', default=None, type=str,
                         help='load an existing model')
@@ -52,6 +50,8 @@ if __name__ == '__main__':
                         help='number of epochs to train for')
     parser.add_argument('-s', '--early_stop', default=None, type=int,
                         help='stop early after n batches')
+    parser.add_argument('--logdir', default=None, type=str,
+                        help='TensorboardX log directory')
 
     args = parser.parse_args()
 
@@ -59,7 +59,7 @@ if __name__ == '__main__':
         print('creating artifacts directory', args.artifacts)
         os.makedirs(args.artifacts)
 
-    writer = SummaryWriter()
+    writer = SummaryWriter(args.logdir)
 
     if args.action == 'inspect' and args.batch_size != 1:
         args.batch_size = 1
@@ -74,7 +74,7 @@ if __name__ == '__main__':
     writer.add_text('general', str(vars(args)))
 
     train_data = DeepglobeDataset(
-        os.path.join(args.data_path, 'train'), global_transform=loader.ROTATE_512
+        os.path.join(args.data_path, 'train'), global_transform=loader.UNCUT#CROP_512
     )
     train_loader = DataLoader(
         train_data, batch_size=args.batch_size, shuffle=True, num_workers=args.workers
@@ -82,48 +82,61 @@ if __name__ == '__main__':
 
     if args.test_on_train:
         val_data = DeepglobeDataset(
-            os.path.join(args.data_path, 'train'), global_transform=loader.CROP_512
+            os.path.join(args.data_path, 'train'), global_transform=loader.UNCUT
         )
     else:
         val_data = DeepglobeDataset(
             os.path.join(args.data_path, 'test'),
-            global_transform=loader.CROP_512
+            global_transform=loader.UNCUT
         )
 
     val_loader = DataLoader(
         val_data, batch_size=args.batch_size, shuffle=False, num_workers=args.workers
     )
 
-    down = [(4, 10, 10), (10, 10, 10), (10, 10, 10), (12, 12, 12)]
-    up = [(10, 10, 10), (10, 10, 10), (10, 10, 10)]
+    down = [(5, 5, 5), (5, 5, 5), (5, 5, 5), (5, 5, 5)]
+    up = [(5, 5, 5), (5, 5, 5), (5, 5, 5)]
 
     if args.model == 'harmonic':
-#        dropout = functools.partial(harmonic.d2.Dropout2d, p=args.dropout)
-        setup = {**hunet.default_setup, 'norm': harmonic.d2.GroupNorm2d}
-        network = hunet.HUnet(in_features=3, down=down, up=up, radius=2)
+        if args.dropout is not None:
+            dropout = functools.partial(harmonic.d2.Dropout2d, p=args.dropout)
+            setup = {**hunet.default_setup, 'dropout': dropout}
+        else:
+            setup = hunet.default_setup
+
+        network = hunet.HUnet(in_features=3, down=down, up=up, radius=2, setup=setup)
+
     elif args.model == 'baseline':
-        down = [repr_to_n(d) for d in down]
-        up = [repr_to_n(d) for d in up]
-        network = Unet(up=up, down=down, in_features=3)
+        if args.dropout is not None:
+            dropout = functools.partial(torch.nn.Dropout2d, p=args.dropout)
+            setup = {**unet.default_setup, 'dropout': dropout}
+        else:
+            setup = unet.default_setup
+
+        down = [unet.repr_to_n(d) for d in down]
+        up = [unet.repr_to_n(d) for d in up]
+        network = unet.Unet(up=up, down=down, in_features=3, setup=setup)
 
     cuda = torch.cuda.is_available()
 
-    network_repr = str(network)
+    network_repr = repr(network)
     print(network_repr)
     writer.add_text('general', network_repr)
+
+    n_params = 0
+    for param in network.parameters():
+        n_params += param.numel()
+    print(n_params, 'learnable parameters')
 
     if cuda:
         network = network.cuda()
 
-    if args.parallel:
-        network = torch.nn.DataParallel(network)
-
-    loss_fn = size_adaptive_(BCE)()
+    loss_fn = size_adaptive_(losses.BCE)()
     loss_fn.name = 'BCE'
 
     optim = torch.optim.Adam([
-        {'params': network.module.l2_params(), 'weight_decay': args.l2},
-        {'params': network.module.nr_params(), 'weight_decay': 0.},
+        {'params': network.l2_params(), 'weight_decay': args.l2},
+        {'params': network.nr_params(), 'weight_decay': 0.},
     ], lr=args.lr)
 
     if not args.no_jit:
@@ -158,7 +171,7 @@ if __name__ == '__main__':
 
     elif args.action == 'train':
         scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
-            optim, 'min', patience=2, verbose=True, cooldown=0
+            optim, 'min', patience=2, verbose=True, cooldown=1
         )
 
         for epoch in range(start_epoch, args.epochs):
@@ -172,13 +185,10 @@ if __name__ == '__main__':
                 network, val_loader, loss_fn, [prec_rec], epoch, writer=writer,
                 early_stop=args.early_stop,
             )
-            f1, f1t = prec_rec.best_f1()
-            iou, iout = prec_rec.best_iou()
 
-            writer.add_scalar('Test/f1', f1, epoch)
-            writer.add_scalar('Test/f1_thres', f1t, epoch)
-            writer.add_scalar('Test/iou', iou, epoch)
-            writer.add_scalar('Test/iou_thres', iout, epoch)
+            results = prec_rec.get_dict()
+            for key in results:
+                writer.add_scalar(f'Test/{key}', results[key], epoch)
 
             scheduler.step(train_loss)
 

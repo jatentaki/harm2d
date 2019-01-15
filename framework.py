@@ -36,7 +36,7 @@ def inspect(network, loader, path, early_stop=None):
     network.eval()
     path += os.path.sep       
     maybe_make_dir(path)
-    
+
     progress = tqdm(total=len(loader), dynamic_ncols=True)
     with progress, torch.no_grad():
         for i, args in enumerate(loader):

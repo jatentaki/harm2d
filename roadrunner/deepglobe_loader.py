@@ -2,6 +2,7 @@ import os, imageio, re, torch
 import numpy as np
 from PIL import Image
 
+
 class DeepglobeDataset:
     def __init__(self, path, img_transform=None, mask_transform=None,
                  lbl_transform=None, global_transform=None):
@@ -66,6 +67,25 @@ class DeepglobeDataset:
 
         return img, mask, lbl
 
+import sys
+sys.path.append('..')
+from utils import rotate
+
+class RotatedDeepglobeDataset(DeepglobeDataset):
+    def __len__(self):
+        return 2 * super(RotatedDeepglobeDataset, self).__len__()
+
+    def __getitem__(self, idx):
+        base = idx // 2
+        i, m, l = super(RotatedDeepglobeDataset, self).__getitem__(base)
+
+        if idx % 2 == 1:
+            i = rotate(i, axes=(1, 2))
+            m = rotate(m, axes=(1, 2))
+            l = rotate(l, axes=(1, 2))
+
+        return i, m, l
+
 if __name__ == '__main__':
     import sys
     import matplotlib.pyplot as plt
@@ -74,7 +94,7 @@ if __name__ == '__main__':
     sys.path.append('..')
     import transforms as tr
 
-    d = DeepglobeDataset(
+    d = RotatedDeepglobeDataset(
         '/home/jatentaki/Storage/jatentaki/Datasets/roads/deepglobe/test/',
         global_transform=tr.Lift(T.ToTensor())
     )

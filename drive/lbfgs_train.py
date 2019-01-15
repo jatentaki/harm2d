@@ -2,14 +2,11 @@ import torch, os
 from utils import AvgMeter, open_file, print_dict, size_adaptive_, fmt_value
 from tqdm import tqdm
 
-def train(network, dataset, loss_fn, optimizer, epoch,
-          early_stop=None, logger=None):
+def train(network, dataset, loss_fn, optimizer, epoch, writer,
+          early_stop=None):
     loss_meter = AvgMeter()
     network.train()
     msg = 'Train epoch {}'.format(epoch)
-    print(msg)
-    if logger is not None:
-        logger.add_msg(msg)
 
     with tqdm(total=len(dataset), dynamic_ncols=True) as progress:
         for i, args in enumerate(dataset):
@@ -25,8 +22,8 @@ def train(network, dataset, loss_fn, optimizer, epoch,
                 loss = loss_fn(prediction, *args[1:])
                 loss.backward()
                 loss_meter.update(loss.item())
-                if logger is not None:
-                    logger.add_dict({'loss': loss_meter.last})
+
+                writer.add_scalar('Train/loss', loss.item(), epoch)
 
                 return loss
 
@@ -34,7 +31,6 @@ def train(network, dataset, loss_fn, optimizer, epoch,
             progress.update(1)
             progress.set_postfix(loss=loss_meter.last, mean=loss_meter.avg)
 
-            if logger is not None:
-                logger.add_dict({'loss': loss_meter.last})
 
+    writer.add_scalar('Train/loss_mean', loss_meter.avg, epoch)
     return loss_meter.avg

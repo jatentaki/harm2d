@@ -1,19 +1,19 @@
-import torch, argparse, itertools, os, warnings, imageio, sys
+import torch, argparse, functools, itertools, os, sys
 import torch.nn.functional as F
 import torchvision.transforms as T
 import numpy as np
 from torch.utils.data import DataLoader
 from tqdm import tqdm
+from tensorboardX import SummaryWriter
 import harmonic
 
 # parent directory
 sys.path.append('../')
-import framework
+import transforms as tr
+import framework, hunet
 from losses import BCE
-from utils import size_adaptive_, maybe_make_dir, print_dict
+from utils import size_adaptive_
 from criteria import PrecRec
-from reg_unet import Unet, repr_to_n
-from hunet import HUnet
 
 # `drive` directory
 import loader
@@ -39,6 +39,8 @@ if __name__ == '__main__':
                         help='Process N times the dataset per epoch')
     parser.add_argument('--cut', metavar='N', default=None, type=int,
                         help='restrict training set size by N examples')
+    parser.add_argument('--dropout', metavar='F', default=0.1, type=float,
+                        help='Dropout probability')
     parser.add_argument('--load', metavar='FILE', default=None, type=str,
                         help='load an existing model')
     parser.add_argument('-j', '--workers', metavar='N', default=1, type=int,
@@ -51,6 +53,8 @@ if __name__ == '__main__':
                         help='number of epochs to train for')
     parser.add_argument('-s', '--early_stop', default=None, type=int,
                         help='stop early after n batches')
+    parser.add_argument('--logdir', default=None, type=str,
+                        help='TensorboardX log directory')
 
     args = parser.parse_args()
 
@@ -58,149 +62,147 @@ if __name__ == '__main__':
         print('creating artifacts directory', args.artifacts)
         os.makedirs(args.artifacts)
 
-    with framework.Logger(args.artifacts + '/log') as logger:
-        if args.action == 'inspect' and args.batch_size != 1:
-            args.batch_size = 1
-            print("Setting --batch-size to 1 for inspection")
+    writer = SummaryWriter(args.logdir)
 
-        if args.action != 'train' and args.epochs is not None:
-            print("Ignoring --epochs outside of training mode")
+    if args.action == 'inspect' and args.batch_size != 1:
+        args.batch_size = 1
+        print("Setting --batch-size to 1 for inspection")
 
-        if args.no_jit and args.optimize:
-            print("Ignoring --optimize in --no-jit setting")
+    if args.action != 'train' and args.epochs is not None:
+        print("Ignoring --epochs outside of training mode")
 
-        logger.add_dict(vars(args))
+    if args.no_jit and args.optimize:
+        print("Ignoring --optimize in --no-jit setting")
 
-        transform = T.Compose([
-            T.CenterCrop(564),
-            T.ToTensor()
-        ])
+    writer.add_text('general', str(vars(args)))
 
-        warnings.simplefilter("ignore")
-        logger.add_msg('Ignoring warnings')
+    transform = T.Compose([
+        T.CenterCrop(644),
+        T.ToTensor()
+    ])
 
-        if args.rot:
-            train_global_transform = loader.RandomRotate()
-        else:
-            train_global_transform = None
+    test_global_transform = tr.Lift(T.Pad(40))
 
-        augumentation = f'augumentation: {type(train_global_transform)}'
-        print(augumentation)
-        logger.add_msg(augumentation)
+    tr_global_transform = [
+#        tr.RandomRotate(),
+#        tr.RandomFlip(),
+        tr.Lift(T.Pad(40))
+    ]
+    tr_global_transform = tr.Compose(tr_global_transform)
 
-        train_data = loader.DriveDataset(
-            args.data_path, training=True, bloat=args.bloat, from_=args.cut,
-            img_transform=transform, mask_transform=transform,
-            label_transform=transform, global_transform=train_global_transform
+    train_data = loader.DriveDataset(
+        args.data_path, training=True, bloat=args.bloat, from_=args.cut,
+        img_transform=transform, mask_transform=transform,
+        label_transform=transform, global_transform=tr_global_transform
+    )
+    train_loader = DataLoader(
+        train_data, batch_size=args.batch_size, shuffle=True, num_workers=args.workers
+    )
+
+    if args.test_on_train:
+        val_data = loader.DriveDataset(
+            args.data_path, training=True, img_transform=transform,
+            mask_transform=transform, label_transform=transform,
+            global_transform=test_global_transform
         )
-        train_loader = DataLoader(
-            train_data, batch_size=args.batch_size, shuffle=True, num_workers=args.workers
-        )
-
-        if args.test_on_train:
-            val_data = loader.DriveDataset(
-                args.data_path, training=True, img_transform=transform,
-                mask_transform=transform, label_transform=transform,
-            )
-        else:
-            val_data = loader.DriveDataset(
-                args.data_path, training=False, img_transform=transform,
-                mask_transform=transform, label_transform=transform
-            )
-
-        val_loader = DataLoader(
-            val_data, batch_size=args.batch_size, shuffle=False, num_workers=args.workers
+    else:
+        val_data = loader.DriveDataset(
+            args.data_path, training=False, img_transform=transform,
+            mask_transform=transform, label_transform=transform,
+            global_transform=test_global_transform
         )
 
-        down = [(2, 3, 2), (4, 5, 4), (8, 10, 8)]
-        up = [(4, 5, 4), (2, 3, 2)]
-        if args.model == 'harmonic':
-            network = HUnet(in_features=3, down=down, up=up, radius=2)
-        elif args.model == 'baseline':
-            down = [repr_to_n(d) for d in down]
-            up = [repr_to_n(d) for d in up]
-            network = Unet(up=up, down=down, in_features=3)
+    val_loader = DataLoader(
+        val_data, batch_size=args.batch_size, shuffle=False, num_workers=args.workers
+    )
 
-        cuda = torch.cuda.is_available()
+    down = [(2, 3, 2), (4, 5, 4), (8, 10, 8)]
+    up = [(4, 5, 4), (2, 3, 2)]
+    if args.model == 'harmonic':
+        dropout = functools.partial(harmonic.d2.Dropout2d, p=args.dropout)
+        setup = {**hunet.default_setup, 'dropout': dropout}
+        network = hunet.HUnet(in_features=3, down=down, up=up, radius=2)#, setup=setup)
+    elif args.model == 'baseline':
+        dropout = functools.partial(torch.nn.Dropout2d, p=args.dropout)
+        setup = {**unet.default_setup, 'dropout': dropout}
+        down = [unet.repr_to_n(d) for d in down]
+        up = [unet.repr_to_n(d) for d in up]
+        network = unet.Unet(up=up, down=down, in_features=3)#, setup=setup)
 
-        network_repr = str(network)
-        print(network_repr)
-        logger.add_msg(network_repr)
+    cuda = torch.cuda.is_available()
 
-        if cuda:
-            network = network.cuda()
+    network_repr = str(network)
+    print(network_repr)
+    writer.add_text('general', network_repr)
 
-        loss_fn = size_adaptive_(BCE)()
-        loss_fn.name = 'BCE'
+    n_params = 0
+    for param in network.parameters():
+        n_params += param.numel()
+    print(n_params, 'learnable parameters')
 
-        optim = torch.optim.LBFGS(network.parameters(), lr=args.lr)
+    if cuda:
+        network = network.cuda()
 
-        criteria = [loss_fn]
+    loss_fn = size_adaptive_(BCE)()
+    loss_fn.name = 'BCE'
 
-        if not args.no_jit:
-            example = next(iter(train_loader))[0][0:1].cuda()
-            network = torch.jit.trace(
-                network, example, check_trace=True, optimize=args.optimize
+    optim = torch.optim.LBFGS(network.parameters(), lr=args.lr)
+
+    criteria = [loss_fn]
+
+    if not args.no_jit:
+        example = next(iter(train_loader))[0][0:1].cuda()
+        network = torch.jit.trace(
+            network, example, check_trace=True, optimize=args.optimize
+        )
+
+    if args.load:
+        checkpoint = framework.load_checkpoint(args.load)
+        start_epoch, best_score, model_dict, optim_dict = checkpoint
+
+        network.load_state_dict(model_dict)
+        optim.load_state_dict(optim_dict)
+        fmt = 'Starting at epoch {}, best score {}. Loaded from {}'
+        start_epoch += 1 # skip to the next after loaded
+        msg = fmt.format(start_epoch, best_score, args.load)
+
+    if not args.load:
+        print('Set start epoch and best score to 0')
+        best_score = 0.
+        start_epoch = 0
+
+    if args.action == 'inspect':
+        framework.inspect(
+            network, val_loader, args.artifacts, early_stop=args.early_stop
+        )
+    elif args.action == 'evaluate':
+        prec_rec = PrecRec()
+        framework.test(network, val_loader, criteria,
+                       logger=logger, callbacks=[prec_rec])
+
+    elif args.action == 'train':
+        scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+            optim, 'min', patience=2, verbose=True, cooldown=1
+        )
+
+        for epoch in range(start_epoch, args.epochs):
+            train_loss = lbfgs_train.train(
+                network, train_loader, loss_fn, optim, epoch,
+                writer=writer, early_stop=args.early_stop
             )
 
-        if args.load:
-            checkpoint = framework.load_checkpoint(args.load)
-            start_epoch, best_score, model_dict, optim_dict = checkpoint
-
-            network.load_state_dict(model_dict)
-            optim.load_state_dict(optim_dict)
-            fmt = 'Starting at epoch {}, best score {}. Loaded from {}'
-            start_epoch += 1 # skip to the next after loaded
-            msg = fmt.format(start_epoch, best_score, args.load)
-            print(msg)
-            for module in network.modules():
-                if hasattr(module, 'relax'):
-                    module.relax()
-                    print(f'relaxing {repr(module)}')
-
-            print(repr(network))
-
-        if not args.load:
-            print('Set start epoch and best score to 0')
-            best_score = 0.
-            start_epoch = 0
-
-        if args.action == 'inspect':
-            framework.inspect(
-                network, val_loader, args.artifacts,
-                criteria=criteria, early_stop=args.early_stop
-            )
-        elif args.action == 'evaluate':
-            prec_rec = PrecRec()
-            framework.test(network, val_loader, criteria,
-                           logger=logger, callbacks=[prec_rec])
-            f1, thres = prec_rec.best_f1()
-            print('F1', f1, 'at', thres)
-
-        elif args.action == 'train':
-            scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
-                optim, 'min', patience=2, verbose=True, cooldown=1
+            prec_rec = PrecRec(n_thresholds=100)
+            framework.test(
+                network, val_loader, loss_fn, [prec_rec], epoch, writer=writer,
+                early_stop=args.early_stop,
             )
 
-            for epoch in range(start_epoch, args.epochs):
-                train_loss = lbfgs_train.train(
-                    network, train_loader, loss_fn, optim, epoch,
-                    early_stop=args.early_stop, logger=logger
-                )
+            results = prec_rec.get_dict()
+            for key in results:
+                writer.add_scalar(f'Test/{key}', results[key], epoch)
 
-                score = framework.test(
-                    network, val_loader, criteria,
-                    early_stop=args.early_stop, logger=logger
-                )
-                scheduler.step(train_loss)
-                framework.save_checkpoint(
-                    epoch, score, network, optim, path=args.artifacts
-                )
+            scheduler.step(train_loss)
 
-                if score > best_score:
-                    best_score = score 
-                    fname = 'model_best_{:.2f}.pth.tar'.format(best_score)
-                    framework.save_checkpoint(
-                        epoch, best_score, network, optim,
-                        path=args.artifacts, fname=fname
-                    )
+            framework.save_checkpoint(
+                epoch, 0., network, optim, path=args.artifacts
+            )

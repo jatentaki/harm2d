@@ -1,0 +1,7 @@
+#! /usr/bin/env bash
+DATA=/cvlabdata2/cvlab/datasets_tyszkiewicz/isic2018
+BASE=compare_baseline_harmonic_no_aug
+B=2
+J=3
+python main.py $DATA $BASE/harmonic harmonic train --lr 1e-3 -b $B -j $J --epochs 40 --logdir=$BASE/tb/harmonic
+#python main.py $DATA $BASE/baseline baseline train --lr 1e-3 -b $B -j $J --epochs 40 --logdir=$BASE/tb/baseline
