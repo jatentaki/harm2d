@@ -24,8 +24,8 @@ if __name__ == '__main__':
     parser.add_argument('data_path', metavar='DIR', help='path to the dataset')
     parser.add_argument('artifacts', metavar='DIR', help='path to store artifacts')
 
-    # behaior choice
-    parser.add_argument('model', choices=['harmonic', 'baseline'])
+    # behavior choice
+    parser.add_argument('model', choices=['harmonic', 'baseline', 'unconstrained'])
     parser.add_argument('action', choices=['train', 'evaluate', 'inspect'])
 
     parser.add_argument('-nj', '--no-jit', action='store_true',
@@ -97,7 +97,7 @@ if __name__ == '__main__':
     down = [(5, 5, 5), (5, 5, 5), (5, 5, 5), (5, 5, 5)]
     up = [(5, 5, 5), (5, 5, 5), (5, 5, 5)]
 
-    if args.model == 'harmonic':
+    if args.model in ('harmonic', 'unconstrained'):
         if args.dropout is not None:
             dropout = functools.partial(harmonic.d2.Dropout2d, p=args.dropout)
             setup = {**hunet.default_setup, 'dropout': dropout}
@@ -139,12 +139,6 @@ if __name__ == '__main__':
         {'params': network.nr_params(), 'weight_decay': 0.},
     ], lr=args.lr)
 
-    if not args.no_jit:
-        example = next(iter(train_loader))[0].cuda()
-        network = torch.jit.trace(
-            network, example, check_trace=True, optimize=args.optimize
-        )
-
     if args.load:
         checkpoint = framework.load_checkpoint(args.load)
         start_epoch, best_score, model_dict, optim_dict = checkpoint
@@ -154,11 +148,32 @@ if __name__ == '__main__':
         fmt = 'Starting at epoch {}, best score {}. Loaded from {}'
         start_epoch += 1 # skip to the next after loaded
         msg = fmt.format(start_epoch, best_score, args.load)
-
-    if not args.load:
+    else:
         print('Set start epoch and best score to 0')
         best_score = 0.
         start_epoch = 0
+
+    if args.model == 'unconstrained':
+        for module in network.modules():
+            if hasattr(module, 'relax'):
+                module.relax()
+                print(f'relaxing {repr(module)}')
+
+        network_repr = repr(network)
+        print(network_repr)
+        writer.add_text('general', network_repr)
+
+        n_params = 0
+        for param in network.parameters():
+            n_params += param.numel()
+        print(n_params, 'learnable parameters')
+
+    if not args.no_jit:
+        example = next(iter(train_loader))[0].cuda()
+        network = torch.jit.trace(
+            network, example, check_trace=True, optimize=args.optimize
+        )
+
 
     if args.action == 'inspect':
         framework.inspect(

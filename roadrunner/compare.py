@@ -54,7 +54,7 @@ if __name__ == '__main__':
     down = [(5, 5, 5), (5, 5, 5), (5, 5, 5), (5, 5, 5)]
     up = [(5, 5, 5), (5, 5, 5), (5, 5, 5)]
 
-    if args.model == 'harmonic':
+    if args.model in ('harmonic', 'unconstrained'):
         network = hunet.HUnet(in_features=3, down=down, up=up, radius=2)
 
     elif args.model == 'baseline':
@@ -68,6 +68,21 @@ if __name__ == '__main__':
     print(network_repr)
     writer.add_text('general', network_repr)
 
+    if args.model == 'unconstrained':
+        for module in network.modules():
+            if hasattr(module, 'relax'):
+                module.relax()
+                print(f'relaxing {repr(module)}')
+
+        network_repr = repr(network)
+        print(network_repr)
+        writer.add_text('general', network_repr)
+
+        n_params = 0
+        for param in network.parameters():
+            n_params += param.numel()
+        print(n_params, 'learnable parameters')
+
     if cuda:
         network = network.cuda()
 
@@ -75,6 +90,7 @@ if __name__ == '__main__':
     start_epoch, best_score, model_dict, optim_dict = checkpoint
 
     network.load_state_dict(model_dict)
+
 
     framework.inspect(
         network, val_loader, args.artifacts, early_stop=args.early_stop

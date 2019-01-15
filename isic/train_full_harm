@@ -1,2 +1,0 @@
-#! /usr/bin/env bash
-python main.py /cvlabdata2/cvlab/datasets_tyszkiewicz/isic2018 artifacts_full_harm_rotated_jittered harmonic train --lr 1e-3 -b 1 -j 1 --epochs 50
