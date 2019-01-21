@@ -18,6 +18,8 @@ class Compose:
         outs = imgs
 
         for transformation in self.transformations:
+            if transformation is None:
+                continue
             outs = list(transformation(*outs))
 
         return outs

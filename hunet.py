@@ -45,6 +45,7 @@ default_setup = {
     'upsample': TrivialUpsample,
     'downsample': TrivialDownsample,
     'dropout': NoOp,
+    'padding': False
 }
 
 
@@ -53,7 +54,16 @@ class Conv(nn.Sequential):
         norm = setup['norm'](repr_in)
         nonl = setup['gate'](repr_in)
         dropout = setup['dropout']()
-        conv = d2.HConv2d(repr_in, repr_out, size, radius=radius)
+
+        conv_kwargs = {}
+        if setup['padding']:
+            conv_kwargs['padding'] = size // 2
+        else:
+            conv_kwargs['padding'] = 0
+
+        conv = d2.HConv2d(
+            repr_in, repr_out, size, radius=radius, conv_kwargs=conv_kwargs
+        )
 
         super(Conv, self).__init__(norm, nonl, dropout, conv)
 
@@ -96,7 +106,15 @@ class FirstDownBlock(nn.Sequential):
         self.in_repr = in_repr
         self.out_repr = out_repr
 
-        conv1 = d2.HConv2d(in_repr, out_repr, size=size, radius=radius)
+        conv_kwargs = {}
+        if setup['padding']:
+            conv_kwargs['padding'] = size // 2
+        else:
+            conv_kwargs['padding'] = 0
+
+        conv1 = d2.HConv2d(
+            in_repr, out_repr, size=size, radius=radius, conv_kwargs=conv_kwargs
+        )
         conv2 = Conv(out_repr, out_repr, size, radius=radius, setup=setup)
  
         super(FirstDownBlock, self).__init__(conv1, conv2)

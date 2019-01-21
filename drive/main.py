@@ -54,6 +54,8 @@ if __name__ == '__main__':
                         help='stop early after n batches')
     parser.add_argument('--logdir', default=None, type=str,
                         help='TensorboardX log directory')
+    parser.add_argument('--padding', action='store_true',
+                        help='use padded convolutions in training')
 
     args = parser.parse_args()
 
@@ -80,14 +82,16 @@ if __name__ == '__main__':
         T.ToTensor()
     ])
 
-    test_global_transform = tr.Lift(T.Pad(40))
+    # if we are not padding the convolutions, we have to pad the input
+    aug_pad = None if args.padding else tr.Lift(T.Pad(40))
 
-    tr_global_transform = [
-#        tr.RandomRotate(),
-#        tr.RandomFlip(),
-        tr.Lift(T.Pad(40))
-    ]
-    tr_global_transform = tr.Compose(tr_global_transform)
+    test_global_transform = aug_pad
+
+    tr_global_transform = tr.Compose([
+        tr.RandomRotate(),
+        tr.RandomFlip(),
+        aug_pad
+    ])
 
     train_data = loader.DriveDataset(
         args.data_path, training=True, bloat=args.bloat, from_=args.cut,
@@ -95,7 +99,8 @@ if __name__ == '__main__':
         label_transform=transform, global_transform=tr_global_transform
     )
     train_loader = DataLoader(
-        train_data, batch_size=args.batch_size, shuffle=True, num_workers=args.workers
+        train_data, batch_size=args.batch_size, shuffle=True,
+        num_workers=args.workers
     )
 
     if args.test_on_train:
@@ -112,25 +117,35 @@ if __name__ == '__main__':
         )
 
     val_loader = DataLoader(
-        val_data, batch_size=args.batch_size, shuffle=False, num_workers=args.workers
+        val_data, batch_size=args.batch_size, shuffle=False,
+        num_workers=args.workers
     )
 
-#    down = [(4, 4), (8, 8), (16, 16)]
-#    up = [(8, 8), (4, 4)]
-#    down = [(2, 2, 2, 2), (4, 4, 4, 4), (8, 8, 8, 8)]
-#    up = [(4, 4, 4, 4), (2, 2, 2, 2)]
-    down = [(2, 3, 2), (4, 5, 4), (8, 10, 8)]
-    up = [(4, 5, 4), (2, 3, 2)]
+    down = [(4, 5, 4), (7, 8, 7), (12, 16, 12)]
+    up = [(7, 8, 7), (4, 5, 4)]
+#    down = [(2, 3, 2), (4, 5, 4), (8, 10, 8)]
+#    up = [(4, 5, 4), (2, 3, 2)]
+
     if args.model == 'harmonic':
         dropout = functools.partial(harmonic.d2.Dropout2d, p=args.dropout)
-        setup = {**hunet.default_setup, 'dropout': dropout}
-        network = hunet.HUnet(in_features=3, down=down, up=up, radius=2)#, setup=setup)
+        setup = {
+            **hunet.default_setup,
+            'dropout': dropout,
+            'padding': args.padding
+        }
+        network = hunet.HUnet(
+            in_features=3, down=down, up=up, radius=2, setup=setup
+        )
     elif args.model == 'baseline':
         dropout = functools.partial(torch.nn.Dropout2d, p=args.dropout)
-        setup = {**unet.default_setup, 'dropout': dropout}
+        setup = {
+            **unet.default_setup,
+            'dropout': dropout,
+            'padding': args.padding
+        }
         down = [unet.repr_to_n(d) for d in down]
         up = [unet.repr_to_n(d) for d in up]
-        network = unet.Unet(up=up, down=down, in_features=3)#, setup=setup)
+        network = unet.Unet(up=up, down=down, in_features=3, setup=setup)
 
     cuda = torch.cuda.is_available()
 

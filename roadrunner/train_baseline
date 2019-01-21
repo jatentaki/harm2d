@@ -1,0 +1,4 @@
+#! /usr/bin/env bash
+DATA=/cvlabdata2/cvlab/datasets_tyszkiewicz/deepglobe/train
+ART=artifacts_baseline
+python main.py $DATA $ART baseline train --lr 1e-2 -b 2 -j 3 --epochs 50 --logdir=$ART/tb/baseline --optimize

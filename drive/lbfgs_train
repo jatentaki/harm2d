@@ -1,4 +1,4 @@
 #!/usr/bin/env bash
 DATA=/cvlabdata2/cvlab/datasets_tyszkiewicz/drive
-ART=artifacts_lbfgs
-python lbfgs.py $DATA $ART harmonic train -b 3 -j 2 --bloat 50 --epochs 100 --lr 1e-3 --logdir=$ART/tb/lbfgs
+ART=artifacts_lbfgs_faster
+python lbfgs.py $DATA $ART harmonic train -b 3 -j 2 --bloat 50 --epochs 100 --lr 1e-2 --logdir=$ART/tb/lbfgs

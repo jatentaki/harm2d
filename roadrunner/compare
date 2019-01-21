@@ -1,9 +1,9 @@
 #! /usr/bin/env bash
 DATA=/cvlabdata2/cvlab/datasets_tyszkiewicz/deepglobe/train/test
-HLOAD=artifacts_harmonic/epoch22.pth.tar
-BLOAD=artifacts_baseline/epoch22.pth.tar
-ULOAD=artifacts_unconstrained/epoch23.pth.tar
-ART=artifacts_compare
-#python compare.py $DATA $ART/harmonic $HLOAD harmonic --logdir=$ART/tb/harmonic -s 10
-#python compare.py $DATA $ART/baseline $BLOAD baseline --logdir=$ART/tb/baseline -s 10
-python compare.py $DATA $ART/unconstr $ULOAD unconstrained --logdir=$ART/tb/unconstrained -s 10
+HLOAD=artifacts_harmonic_resume/epoch34.pth.tar
+BLOAD=artifacts_baseline/epoch34.pth.tar
+ULOAD=artifacts_unconstrained/epoch34.pth.tar
+ART=compare_images_after
+python compare.py $DATA $ART/harmonic $HLOAD harmonic --logdir=$ART/tb/harmonic -s 4
+python compare.py $DATA $ART/baseline $BLOAD baseline --logdir=$ART/tb/baseline -s 4
+python compare.py $DATA $ART/unconstr $ULOAD unconstrained --logdir=$ART/tb/unconstrained -s 4

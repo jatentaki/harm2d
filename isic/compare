@@ -1,0 +1,11 @@
+#! /usr/bin/env bash
+DATA=/cvlabdata2/cvlab/datasets_tyszkiewicz/isic2018
+LOAD=compare_baseline_harmonic_no_aug
+HLOAD=$LOAD/harmonic/epoch39.pth.tar
+BLOAD=$LOAD/baseline/epoch39.pth.tar
+ULOAD=$LOAD/unconstr/epoch39.pth.tar
+ART=processed_39
+S=4
+python compare.py $DATA $ART/harmonic $HLOAD harmonic --logdir=$ART/tb/harmonic -s $S
+python compare.py $DATA $ART/baseline $BLOAD baseline --logdir=$ART/tb/baseline -s $S
+python compare.py $DATA $ART/unconstr $ULOAD unconstrained --logdir=$ART/tb/unconstrained -s $S

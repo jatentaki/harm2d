@@ -5,6 +5,7 @@ from PIL import Image
 
 sys.path.append('..')
 import transforms as tr
+from utils import rotated_dataset
 
 class ISICDataset:
     def __init__(self, path, img_transform=T.ToTensor(), mask_transform=T.ToTensor(),
@@ -110,21 +111,19 @@ PAD_TRANS_1024 = tr.Compose([
     tr.Lift(T.Pad(88)),
 ])
 
+RotatedISICDataset = rotated_dataset(ISICDataset)
+
 if __name__ == '__main__':
     target_size = 1024, 768
     
-    d = ISICDataset(
+    d = RotatedISICDataset(
         '/home/jatentaki/Storage/jatentaki/Datasets/isic2018',
-        global_transform=ROTATE_TRANS_1024, normalize=True,
-        img_transform=T.Compose([
-            T.ColorJitter(0.1, 0.1, 0.1, hue=0.05),
-            T.ToTensor()
-        ])
-
+        global_transform=PAD_TRANS_1024, normalize=True,
+        img_transform=T.ToTensor()
     )
     import matplotlib.pyplot as plt
     for i in range(25, 50):
-        img, mask, lbl = d[0]
+        img, mask, lbl = d[i]
 
         img = d.denormalize(img).numpy().transpose(1, 2, 0)
         lbl = lbl.numpy()[0]

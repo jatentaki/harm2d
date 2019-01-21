@@ -69,22 +69,9 @@ class DeepglobeDataset:
 
 import sys
 sys.path.append('..')
-from utils import rotate
+from utils import rotated_dataset
 
-class RotatedDeepglobeDataset(DeepglobeDataset):
-    def __len__(self):
-        return 2 * super(RotatedDeepglobeDataset, self).__len__()
-
-    def __getitem__(self, idx):
-        base = idx // 2
-        i, m, l = super(RotatedDeepglobeDataset, self).__getitem__(base)
-
-        if idx % 2 == 1:
-            i = rotate(i, axes=(1, 2))
-            m = rotate(m, axes=(1, 2))
-            l = rotate(l, axes=(1, 2))
-
-        return i, m, l
+RotatedDeepglobeDataset = rotated_dataset(DeepglobeDataset)
 
 if __name__ == '__main__':
     import sys
