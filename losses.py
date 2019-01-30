@@ -7,14 +7,9 @@ class BCE(nn.Module):
         super(BCE, self).__init__()
         self.masked = masked
 
-    def forward(self, *args):
-        if self.masked:
-            prediction, mask, target = args
-            mask = mask.to(torch.uint8)
-            prediction = prediction[mask]
-            target = target[mask]
+    def forward(self, prediction, mask, target):
+        loss = F.binary_cross_entropy_with_logits(
+            prediction, target, reduction='none'
+        )
 
-        else:
-            prediction, target = args
-
-        return F.binary_cross_entropy_with_logits(prediction, target.to(torch.float32))
+        return (loss * mask).mean()

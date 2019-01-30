@@ -1,6 +1,7 @@
 import torch, os, imageio, re, random, sys
 import torchvision as tv
 import torchvision.transforms as T
+import scipy.ndimage as ndi
 from PIL import Image
 
 sys.path.append('..')
@@ -8,18 +9,21 @@ import transforms as tr
 from utils import rotated_dataset
 
 class ISICDataset:
-    def __init__(self, path, img_transform=T.ToTensor(), mask_transform=T.ToTensor(),
-                 lbl_transform=T.ToTensor(), global_transform=None, normalize=False):
-
-        self.normalize = normalize
-
+    def __init__(self, path, img_transform=T.ToTensor(),
+                 lbl_transform=T.ToTensor(), global_transform=None,
+                 bg_weight=1., fg_weight=1., eg_weight=1., eg_size=5):
         self.img_p = path + os.path.sep + 'imgs'
         self.lbl_p = path + os.path.sep + 'lbls'
 
         self.img_transform = img_transform
         self.lbl_transform = lbl_transform
-        self.mask_transform = mask_transform
         self.global_transform = global_transform
+
+        total_weight = bg_weight + fg_weight + eg_weight
+        self.bg_weight = bg_weight / total_weight
+        self.fg_weight = fg_weight / total_weight
+        self.eg_weight = eg_weight / total_weight
+        self.eg_size   = eg_size
 
         img_re = re.compile('^ISIC_(\d{7})\.jpg$')
         lbl_re = re.compile('^ISIC_(\d{7})_segmentation\.png$')
@@ -65,10 +69,9 @@ class ISICDataset:
         id = str(id).zfill(7)
         img = self.fetch_img(id)
         lbl = self.fetch_lbl(id)
-        mask = Image.new('L', lbl.size, color=255)
 
         if self.global_transform:
-            img, mask, lbl = self.global_transform(img, mask, lbl)
+            img, lbl = self.global_transform(img, lbl)
 
         if self.img_transform:
             img = self.img_transform(img)
@@ -76,29 +79,19 @@ class ISICDataset:
         if self.lbl_transform:
             lbl = self.lbl_transform(lbl)
 
-        if self.mask_transform:
-            mask = self.mask_transform(mask)
+        lbl = lbl.to(torch.uint8)
+        edge = ndi.morphological_gradient(lbl.numpy()[0], size=self.eg_size)
 
-        mask = mask.to(torch.uint8)
+        edge = torch.from_numpy(edge)[None]
+        background = ~lbl & ~edge
+        foreground =  lbl & ~edge
 
-        if self.normalize:
-            img = self._normalize(img, mask)
+        mask = torch.zeros_like(edge, dtype=torch.float32)
+        mask[edge] = self.eg_weight / edge.sum().item()
+        mask[background] = self.bg_weight / background.sum().item()
+        mask[foreground] = self.fg_weight / foreground.sum().item()
 
         return img, mask, lbl
-
-    def _normalize(self, img, mask):
-        mean = torch.tensor([0.71, 0.57, 0.53]).reshape(3, 1, 1)
-        std = torch.tensor([0.17, 0.17, 0.18]).reshape(3, 1, 1)
-
-        demeaned = (img - mean) / std
-
-        return torch.where(mask, demeaned, torch.tensor(0.))
-
-    def denormalize(self, img):
-        mean = torch.tensor([0.71, 0.57, 0.53]).reshape(3, 1, 1)
-        std = torch.tensor([0.17, 0.17, 0.18]).reshape(3, 1, 1)
-        
-        return torch.clamp(img * std + mean, 0., 1.)
 
 ROTATE_TRANS_1024 = tr.Compose([
     tr.AspectPreservingResizeTransform((1024, 768)),
@@ -116,21 +109,22 @@ RotatedISICDataset = rotated_dataset(ISICDataset)
 if __name__ == '__main__':
     target_size = 1024, 768
     
-    d = RotatedISICDataset(
+    d = ISICDataset(
         '/home/jatentaki/Storage/jatentaki/Datasets/isic2018',
-        global_transform=PAD_TRANS_1024, normalize=True,
+        global_transform=PAD_TRANS_1024,
         img_transform=T.ToTensor()
     )
     import matplotlib.pyplot as plt
+    import scipy.ndimage as ndi
+
     for i in range(25, 50):
         img, mask, lbl = d[i]
 
-        img = d.denormalize(img).numpy().transpose(1, 2, 0)
+        img = img.numpy().transpose(1, 2, 0)
         lbl = lbl.numpy()[0]
-#        plt.imshow(img[..., 0], vmin=-2, vmax=2)
+        mask = mask.numpy()[0]
         plt.imshow(img)
-#        plt.figure()
-#        plt.imshow(lbl)
-#        plt.figure()
-#        plt.imshow(mask.to(torch.uint8).numpy()[0])
+        plt.figure()
+        plt.imshow(mask)
+
         plt.show()
