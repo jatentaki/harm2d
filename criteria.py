@@ -25,7 +25,7 @@ class PrecRec(Criterion):
             msg = f'Expected single batch item, got {prediction.size(0)}'
             raise ValueError(msg)
 
-        mask = mask.to(torch.uint8)
+        mask = mask != 0.
         prediction = prediction[mask]
         target = target[mask]
 
@@ -129,7 +129,7 @@ class IsicPrecRec(PrecRec):
                 if f1 >= 0.65:
                     self.isic_f1[threshold_i] += f1
 
-                self.n_processed += 1
+            self.n_processed += 1
 
         return torch.tensor(0.)
 

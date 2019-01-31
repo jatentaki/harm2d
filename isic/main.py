@@ -190,8 +190,17 @@ if __name__ == '__main__':
         )
     elif args.action == 'evaluate':
         prec_rec = IsicPrecRec()
-        framework.test(network, val_loader, loss_fn, [],
-                       logger=logger, callbacks=[prec_rec])
+        framework.test(
+            network, val_loader, loss_fn, [prec_rec], start_epoch, writer=writer,
+            early_stop=args.early_stop,
+        )
+        results = prec_rec.get_dict()
+        print(results)
+        for key in results:
+            writer.add_scalar(f'Evaluation/{key}', results[key], start_epoch)
+
+        for i in range(30):
+            writer.add_scalar('dupa', i, i)
 
     elif args.action == 'train':
         scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(

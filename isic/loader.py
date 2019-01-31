@@ -10,12 +10,14 @@ from utils import rotated_dataset
 
 class ISICDataset:
     def __init__(self, path, img_transform=T.ToTensor(),
-                 lbl_transform=T.ToTensor(), global_transform=None,
-                 bg_weight=1., fg_weight=1., eg_weight=1., eg_size=10):
+                 lbl_transform=T.ToTensor(), mask_transform=T.ToTensor(),
+                 global_transform=None, eg_size=10,
+                 bg_weight=1., fg_weight=1., eg_weight=1.):
         self.img_p = path + os.path.sep + 'imgs'
         self.lbl_p = path + os.path.sep + 'lbls'
 
         self.img_transform = img_transform
+        self.mask_transform = mask_transform
         self.lbl_transform = lbl_transform
         self.global_transform = global_transform
 
@@ -69,12 +71,16 @@ class ISICDataset:
         id = str(id).zfill(7)
         img = self.fetch_img(id)
         lbl = self.fetch_lbl(id)
+        mask = Image.new('L', lbl.size, color=255)
 
         if self.global_transform:
-            img, lbl = self.global_transform(img, lbl)
+            img, mask, lbl = self.global_transform(img, mask, lbl)
 
         if self.img_transform:
             img = self.img_transform(img)
+
+        if self.mask_transform:
+            mask = self.mask_transform(mask)
 
         if self.lbl_transform:
             lbl = self.lbl_transform(lbl)
@@ -86,11 +92,13 @@ class ISICDataset:
         background = ~lbl & ~edge
         foreground =  lbl & ~edge
 
-        mask = torch.zeros_like(edge, dtype=torch.float32)
-        n = mask.numel()
-        mask[edge] = n * self.eg_weight / edge.sum().item()
-        mask[background] = n * self.bg_weight / background.sum().item()
-        mask[foreground] = n * self.fg_weight / foreground.sum().item()
+        weights = torch.zeros_like(edge, dtype=torch.float32)
+        n = weights.numel()
+        weights[edge] = n * self.eg_weight / edge.sum().item()
+        weights[background] = n * self.bg_weight / background.sum().item()
+        weights[foreground] = n * self.fg_weight / foreground.sum().item()
+
+        mask = mask * weights
 
         return img, mask, lbl
 
