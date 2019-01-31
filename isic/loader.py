@@ -11,7 +11,7 @@ from utils import rotated_dataset
 class ISICDataset:
     def __init__(self, path, img_transform=T.ToTensor(),
                  lbl_transform=T.ToTensor(), global_transform=None,
-                 bg_weight=1., fg_weight=1., eg_weight=1., eg_size=5):
+                 bg_weight=1., fg_weight=1., eg_weight=1., eg_size=10):
         self.img_p = path + os.path.sep + 'imgs'
         self.lbl_p = path + os.path.sep + 'lbls'
 
@@ -87,9 +87,10 @@ class ISICDataset:
         foreground =  lbl & ~edge
 
         mask = torch.zeros_like(edge, dtype=torch.float32)
-        mask[edge] = self.eg_weight / edge.sum().item()
-        mask[background] = self.bg_weight / background.sum().item()
-        mask[foreground] = self.fg_weight / foreground.sum().item()
+        n = mask.numel()
+        mask[edge] = n * self.eg_weight / edge.sum().item()
+        mask[background] = n * self.bg_weight / background.sum().item()
+        mask[foreground] = n * self.fg_weight / foreground.sum().item()
 
         return img, mask, lbl
 
@@ -112,6 +113,7 @@ if __name__ == '__main__':
     d = ISICDataset(
         '/home/jatentaki/Storage/jatentaki/Datasets/isic2018',
         global_transform=PAD_TRANS_1024,
+        eg_size=10,
         img_transform=T.ToTensor()
     )
     import matplotlib.pyplot as plt
@@ -126,5 +128,7 @@ if __name__ == '__main__':
         plt.imshow(img)
         plt.figure()
         plt.imshow(mask)
+        plt.figure()
+        plt.imshow(lbl)
 
         plt.show()

@@ -81,12 +81,11 @@ if __name__ == '__main__':
     writer.add_text('general', str(vars(args)))
 
     train_data = loader.ISICDataset(
-        args.data_path + '/train', global_transform=loader.PAD_TRANS_1024,#ROTATE_TRANS_1024,
+        args.data_path + '/train', global_transform=loader.PAD_TRANS_1024,
         img_transform=T.Compose([
             T.ColorJitter(0.1, 0.1, 0.1, 0.05),
             T.ToTensor()
         ]),
-        normalize=True
     )
     train_loader = DataLoader(
         train_data, batch_size=args.batch_size, shuffle=True,
@@ -96,12 +95,10 @@ if __name__ == '__main__':
     if args.test_on_train:
         val_data = loader.ISICDataset(
             args.data_path + '/train', global_transform=loader.PAD_TRANS_1024,
-            normalize=True
         )
     else:
         val_data = loader.ISICDataset(
             args.data_path + '/test', global_transform=loader.PAD_TRANS_1024,
-            normalize=True
         )
 
     val_loader = DataLoader(

@@ -1,7 +1,6 @@
 import torch, os
 import numpy as np
 from tqdm import tqdm
-from torchvision.utils import make_grid
 
 from utils import AvgMeter, open_file, print_dict, maybe_make_dir, cut_to_match
 
@@ -70,15 +69,17 @@ def inspect(network, loader, path, early_stop=None):
 def train(network, dataset, loss_fn, optimizer, epoch, writer,
           early_stop=None, batch_multiplier=1):
 
-    def optimization_step(i, *args, save=False):
+    def optimization_step(i, img, mask, lbl, save=False):
         if i % batch_multiplier == 0:
             optimizer.zero_grad()
 
         if torch.cuda.is_available():
-            args = [a.cuda() for a in args]
+            img = img.cuda()
+            mask = mask.cuda()
+            lbl = lbl.cuda()
 
-        prediction = network(args[0])
-        loss = loss_fn(prediction, *args[1:])
+        prediction = network(img)
+        loss = loss_fn(prediction, mask, lbl)
         loss.backward()
 
         if (i+1) % batch_multiplier == 0:
@@ -86,11 +87,11 @@ def train(network, dataset, loss_fn, optimizer, epoch, writer,
 
         if save:
             pred = torch.sigmoid(prediction)
-            data = cut_to_match(pred, args[0])
-            gt = cut_to_match(pred, args[2])
-            writer.add_image('Train/prediction', make_grid(pred), epoch)
-            writer.add_image('Train/image', make_grid(data), epoch)
-            writer.add_image('Train/ground_truth', make_grid(gt), epoch)
+            data = cut_to_match(pred, img)
+            gt = cut_to_match(pred, lbl)
+            writer.add_image('Train/prediction', pred[0], epoch)
+            writer.add_image('Train/image', data[0], epoch)
+            writer.add_image('Train/ground_truth', gt[0], epoch)
 
         return loss
 
@@ -120,29 +121,33 @@ def test(network, dataset, loss_fn, criteria, epoch, writer, early_stop=None):
 
     progress = tqdm(total=len(dataset), dynamic_ncols=True)
     with progress, torch.no_grad():
-        for i, args in enumerate(dataset):
+        for i, (img, mask, lbl) in enumerate(dataset):
             if i == early_stop:
                 break
 
             if torch.cuda.is_available():
-                args = [a.cuda() for a in args]
+                img = img.cuda()
+                mask = mask.cuda()
+                lbl = lbl.cuda()
 
-            prediction = network(args[0])
-            loss = loss_fn(prediction, *args[1:]).item()
+            prediction = network(img)
+            loss = loss_fn(prediction, mask, lbl).item()
+
+            if i == 0:
+                pred = torch.sigmoid(prediction)
+                img = cut_to_match(pred, img)
+                lbl = cut_to_match(pred, lbl)
+                writer.add_image('Test/prediction', pred[0], epoch)
+                writer.add_image('Test/image', img[0], epoch)
+                writer.add_image('Test/ground_truth', lbl[0], epoch)
 
             loss_meter.update(loss)
 
             writer.add_scalar('Test/loss', loss, epoch)
             for criterion in criteria:
-                value = criterion(prediction, *args[1:])
+                value = criterion(prediction, mask, lbl)
                 writer.add_scalar(f'Test/{criterion.name}', value.item(), epoch)
             progress.update(1)
 
-    pred = torch.sigmoid(prediction)
-    data = cut_to_match(pred, args[0])
-    gt = cut_to_match(pred, args[2])
-    writer.add_image('Test/prediction', make_grid(pred), epoch)
-    writer.add_image('Test/image', make_grid(data), epoch)
-    writer.add_image('Test/ground_truth', make_grid(gt), epoch)
 
     writer.add_scalar('Test/loss_mean', loss_meter.avg, epoch)

@@ -9,7 +9,7 @@ class BCE(nn.Module):
 
     def forward(self, prediction, mask, target):
         loss = F.binary_cross_entropy_with_logits(
-            prediction, target, reduction='none'
+            prediction, target.to(torch.float32), reduction='none'
         )
 
         return (loss * mask).mean()
