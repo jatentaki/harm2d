@@ -15,7 +15,8 @@ sys.path.append('..')
 import losses, framework, hunet, unet
 import criteria as criteria_mod
 from utils import size_adaptive_
-from criteria import IsicPrecRec
+from criteria import PrecRec
+from isic_f1 import IsicF1
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='PyTorch 2d segmentation')
@@ -189,18 +190,18 @@ if __name__ == '__main__':
             network, val_loader, args.artifacts, early_stop=args.early_stop
         )
     elif args.action == 'evaluate':
-        prec_rec = IsicPrecRec()
+        callbacks = [PrecRec(), IsicF1()]
+
         framework.test(
-            network, val_loader, loss_fn, [prec_rec], start_epoch, writer=writer,
+            network, val_loader, loss_fn, callbacks, start_epoch, writer=writer,
             early_stop=args.early_stop,
         )
-        results = prec_rec.get_dict()
-        print(results)
-        for key in results:
-            writer.add_scalar(f'Evaluation/{key}', results[key], start_epoch)
 
-        for i in range(30):
-            writer.add_scalar('dupa', i, i)
+        for callback in callbacks:
+            results = callback.get_dict()
+            print(results)
+            for key in results:
+                writer.add_scalar(f'Evaluation/{key}', results[key], start_epoch)
 
     elif args.action == 'train':
         scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
@@ -213,15 +214,16 @@ if __name__ == '__main__':
                 writer=writer, early_stop=args.early_stop
             )
 
-            prec_rec = IsicPrecRec(n_thresholds=100)
+            callbacks = [PrecRec(), IsicF1()]
             framework.test(
-                network, val_loader, loss_fn, [prec_rec], epoch, writer=writer,
+                network, val_loader, loss_fn, callbacks, epoch, writer=writer,
                 early_stop=args.early_stop,
             )
 
-            results = prec_rec.get_dict()
-            for key in results:
-                writer.add_scalar(f'Test/{key}', results[key], epoch)
+            for callback in callbacks:
+                results = callback.get_dict()
+                for key in results:
+                    writer.add_scalar(f'Test/{key}', results[key], epoch)
 
             scheduler.step(train_loss)
 

@@ -146,7 +146,8 @@ def test(network, dataset, loss_fn, criteria, epoch, writer, early_stop=None):
             writer.add_scalar('Test/loss', loss, epoch)
             for criterion in criteria:
                 value = criterion(prediction, mask, lbl)
-                writer.add_scalar(f'Test/{criterion.name}', value.item(), epoch)
+                value = value.item() if isinstance(value, torch.Tensor) else value
+                writer.add_scalar(f'Test/{criterion.name}', value, epoch)
             progress.update(1)
 
 
