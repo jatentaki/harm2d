@@ -16,7 +16,7 @@ import losses, framework, hunet, unet
 import criteria as criteria_mod
 from utils import size_adaptive_
 from criteria import PrecRec
-from isic_f1 import IsicF1
+from isic_f1 import IsicIoU
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='PyTorch 2d segmentation')
@@ -81,12 +81,17 @@ if __name__ == '__main__':
 
     writer.add_text('general', str(vars(args)))
 
+    loader_weights = {
+        'bg_weight': 1., 'fg_weight': 1., 'eg_weight': 1.
+    }
+
     train_data = loader.ISICDataset(
         args.data_path + '/train', global_transform=loader.PAD_TRANS_1024,
         img_transform=T.Compose([
             T.ColorJitter(0.1, 0.1, 0.1, 0.05),
             T.ToTensor()
         ]),
+        **loader_weights
     )
     train_loader = DataLoader(
         train_data, batch_size=args.batch_size, shuffle=True,
@@ -96,10 +101,12 @@ if __name__ == '__main__':
     if args.test_on_train:
         val_data = loader.ISICDataset(
             args.data_path + '/train', global_transform=loader.PAD_TRANS_1024,
+            **loader_weights
         )
     else:
         val_data = loader.ISICDataset(
             args.data_path + '/test', global_transform=loader.PAD_TRANS_1024,
+            **loader_weights
         )
 
     val_loader = DataLoader(
@@ -116,7 +123,7 @@ if __name__ == '__main__':
         else:
             setup = hunet.default_setup
 
-        network = hunet.HUnet(in_features=3, down=down, up=up, radius=2, setup=setup)
+        network = hunet.HUnet(in_features=4, down=down, up=up, radius=2, setup=setup)
 
     elif args.model == 'baseline':
         if args.dropout is not None:
@@ -127,7 +134,7 @@ if __name__ == '__main__':
 
         down = [unet.repr_to_n(d) for d in down]
         up = [unet.repr_to_n(d) for d in up]
-        network = unet.Unet(up=up, down=down, in_features=3, setup=setup)
+        network = unet.Unet(up=up, down=down, in_features=4, setup=setup)
 
     cuda = torch.cuda.is_available()
 
@@ -190,7 +197,7 @@ if __name__ == '__main__':
             network, val_loader, args.artifacts, early_stop=args.early_stop
         )
     elif args.action == 'evaluate':
-        callbacks = [PrecRec(), IsicF1()]
+        callbacks = [PrecRec(), IsicIoU()]
 
         framework.test(
             network, val_loader, loss_fn, callbacks, start_epoch, writer=writer,
@@ -214,7 +221,7 @@ if __name__ == '__main__':
                 writer=writer, early_stop=args.early_stop
             )
 
-            callbacks = [PrecRec(), IsicF1()]
+            callbacks = [PrecRec(), IsicIoU()]
             framework.test(
                 network, val_loader, loss_fn, callbacks, epoch, writer=writer,
                 early_stop=args.early_stop,

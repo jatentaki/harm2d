@@ -1,6 +1,8 @@
 import torch, os, imageio, re, random, sys
+import numpy as np
 import torchvision as tv
 import torchvision.transforms as T
+import torch.nn.functional as F
 import scipy.ndimage as ndi
 from PIL import Image
 
@@ -13,8 +15,12 @@ class ISICDataset:
                  lbl_transform=T.ToTensor(), mask_transform=T.ToTensor(),
                  global_transform=None, eg_size=10,
                  bg_weight=1., fg_weight=1., eg_weight=1.):
-        self.img_p = path + os.path.sep + 'imgs'
-        self.lbl_p = path + os.path.sep + 'lbls'
+        self.img_p = os.path.join(path, 'imgs')
+        self.lbl_p = os.path.join(path, 'lbls')
+        self.mean_p = os.path.join(path, 'mean.npy')
+
+        mean = torch.from_numpy(np.load(self.mean_p).astype(np.float32))
+        self.mean = F.pad(mean, (88, 88, 88, 88))
 
         self.img_transform = img_transform
         self.mask_transform = mask_transform
@@ -99,6 +105,8 @@ class ISICDataset:
         weights[foreground] = n * self.fg_weight / foreground.sum().item()
 
         mask = mask * weights
+
+        img = torch.cat([img, self.mean[None]], dim=0)
 
         return img, mask, lbl
 

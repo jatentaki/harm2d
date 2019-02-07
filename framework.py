@@ -90,7 +90,7 @@ def train(network, dataset, loss_fn, optimizer, epoch, writer,
             data = cut_to_match(pred, img)
             gt = cut_to_match(pred, lbl)
             writer.add_image('Train/prediction', pred[0], epoch)
-            writer.add_image('Train/image', data[0], epoch)
+            writer.add_image('Train/image', data[0, :3], epoch)
             writer.add_image('Train/ground_truth', gt[0], epoch)
 
         return loss
@@ -138,7 +138,7 @@ def test(network, dataset, loss_fn, criteria, epoch, writer, early_stop=None):
                 img = cut_to_match(pred, img)
                 lbl = cut_to_match(pred, lbl)
                 writer.add_image('Test/prediction', pred[0], epoch)
-                writer.add_image('Test/image', img[0], epoch)
+                writer.add_image('Test/image', img[0, :3], epoch)
                 writer.add_image('Test/ground_truth', lbl[0], epoch)
 
             loss_meter.update(loss)
