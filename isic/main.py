@@ -86,11 +86,12 @@ if __name__ == '__main__':
     }
 
     train_data = loader.ISICDataset(
-        args.data_path + '/train', global_transform=loader.PAD_TRANS_1024,
+        args.data_path + '/easy', global_transform=loader.PAD_TRANS_1024,
         img_transform=T.Compose([
             T.ColorJitter(0.1, 0.1, 0.1, 0.05),
             T.ToTensor()
         ]),
+        flip=True,
         **loader_weights
     )
     train_loader = DataLoader(
@@ -117,12 +118,12 @@ if __name__ == '__main__':
     down = [(5, 5, 5), (5, 5, 5), (5, 5, 5), (5, 5, 5)]
     up = [(5, 5, 5), (5, 5, 5), (5, 5, 5)]
     if args.model in ('harmonic', 'unconstrained'):
+        setup = hunet.default_setup
         if args.dropout is not None:
             dropout = functools.partial(harmonic.d2.Dropout2d, p=args.dropout)
-            setup = {**hunet.default_setup, 'dropout': dropout}
-        else:
-            setup = hunet.default_setup
+            setup['dropout'] = dropout
 
+        setup['norm'] = harmonic.d2.RayleighNorm2d
         network = hunet.HUnet(in_features=4, down=down, up=up, radius=2, setup=setup)
 
     elif args.model == 'baseline':

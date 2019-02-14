@@ -10,14 +10,24 @@ sys.path.append('..')
 import transforms as tr
 from utils import rotated_dataset
 
+def random_flip(*tensors):
+    dims = []
+    if random.randint(0, 1):
+        dims.append(-1)
+    if random.randint(0, 1):
+        dims.append(-2)
+
+    return [torch.flip(t, dims) for t in tensors]
+
 class ISICDataset:
     def __init__(self, path, img_transform=T.ToTensor(),
                  lbl_transform=T.ToTensor(), mask_transform=T.ToTensor(),
                  global_transform=None, eg_size=10,
-                 bg_weight=1., fg_weight=1., eg_weight=1.):
+                 bg_weight=1., fg_weight=1., eg_weight=1., flip=False):
         self.img_p = os.path.join(path, 'imgs')
         self.lbl_p = os.path.join(path, 'lbls')
         self.mean_p = os.path.join(path, 'mean.npy')
+        self.flip = flip
 
         mean = torch.from_numpy(np.load(self.mean_p).astype(np.float32))
         self.mean = F.pad(mean, (88, 88, 88, 88))
@@ -108,6 +118,9 @@ class ISICDataset:
 
         img = torch.cat([img, self.mean[None]], dim=0)
 
+        if self.flip:
+            img, mask, lbl = random_flip(img, mask, lbl)
+
         return img, mask, lbl
 
 ROTATE_TRANS_1024 = tr.Compose([
@@ -126,25 +139,25 @@ RotatedISICDataset = rotated_dataset(ISICDataset)
 if __name__ == '__main__':
     target_size = 1024, 768
     
+    img_transform=T.Compose([
+        T.ColorJitter(0.3, 0.3, 0.3, 0.),
+        T.ToTensor()
+    ])
+
     d = ISICDataset(
         '/home/jatentaki/Storage/jatentaki/Datasets/isic2018',
         global_transform=PAD_TRANS_1024,
         eg_size=10,
-        img_transform=T.ToTensor()
+        img_transform=img_transform
     )
     import matplotlib.pyplot as plt
-    import scipy.ndimage as ndi
 
-    for i in range(25, 50):
-        img, mask, lbl = d[i]
+    fig, axes = plt.subplots(4, 4)
 
-        img = img.numpy().transpose(1, 2, 0)
-        lbl = lbl.numpy()[0]
-        mask = mask.numpy()[0]
-        plt.imshow(img)
-        plt.figure()
-        plt.imshow(mask)
-        plt.figure()
-        plt.imshow(lbl)
+    for i, ax in enumerate(axes.flatten()):
+        img, mask, lbl = d[0]
+        ax.imshow(img.numpy().transpose(1, 2, 0)[..., :3])
+        ax.set_axis_off()
 
-        plt.show()
+    fig.tight_layout()
+    plt.show()

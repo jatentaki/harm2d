@@ -1,10 +1,15 @@
-import os, imageio, re
+import os, imageio, re, torch
 import torch.nn.functional as F
+import numpy as np
 from PIL import Image
 
 class ProcessDataset:
-    def __init__(self, path):
+    def __init__(self, path, mean_path):
         self.img_p = path
+        self.mean_p = mean_path
+
+        mean = torch.from_numpy(np.load(self.mean_p).astype(np.float32))
+        self.mean = F.pad(mean, (88, 88, 88, 88))[None]
 
         img_re = re.compile('^ISIC_(\d{7})\.jpg$')
         self.ids = []
@@ -18,6 +23,9 @@ class ProcessDataset:
         fmt = self.img_p + os.path.sep + 'ISIC_{}.jpg'
         path = fmt.format(id)
         return path, Image.fromarray(imageio.imread(path))
+
+    def add_mean(self, tensor):
+        return torch.cat([tensor, self.mean], dim=0)
 
     def __len__(self):
         return len(self.ids)

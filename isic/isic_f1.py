@@ -72,10 +72,14 @@ class IsicF1:
             'isic_thres': thres
         }
 
-def process_one_img(prediction, mask, target, thresholds):
+def process_one_img(prediction, mask, target, thresholds, logit_input=True):
     mask = mask.cpu().numpy() != 0.
     target = target.cpu().numpy().astype(np.bool)
-    sigmoids = torch.sigmoid(prediction).cpu().numpy()
+    if logit_input:
+        sigmoids = torch.sigmoid(prediction)
+    else:
+        sigmoids = prediction
+    sigmoids = sigmoids.cpu().numpy()
 
     target = target[mask]
 
@@ -92,8 +96,7 @@ def process_one_img(prediction, mask, target, thresholds):
 
         iou = inter / (union_2 - inter)
 
-        if iou >= 0.65:
-            ious[th_i] += iou
+        ious[th_i] = iou
     
     return ious
 

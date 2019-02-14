@@ -1,54 +1,41 @@
-import os, imageio
+import torch, os, imageio
 import multiprocessing as mp
 import numpy as np
+from tqdm import tqdm
 
-#gt_path = '~/Storage/jatentaki/Datasets/isic2018/lbls'
+from isic_f1 import process_one_img
+
 gt_path = '/cvlabdata2/cvlab/datasets_tyszkiewicz/isic2018/test/lbls'
-pr_path = '/cvlabdata2/home/tyszkiew/full_size_iou'
-#pr_path = 'full_size'
+pr_path = '/cvlabdata2/home/tyszkiew/full_size_iou_jitter_rayleigh_flip'
 
-def f1(pr, gt):
-    tp =  pr &  gt
-    fp =  pr & ~gt
-    fn = ~pr & gt
+thresholds = np.array([0.5455])#np.linspace(0.3, 0.7, 10)
+def job(file):
+    pred = np.load(os.path.join(pr_path, file))
+    seg_fname = file[:-4] + '_segmentation.png'
+    gt = imageio.imread(os.path.join(gt_path, seg_fname)) == 255
 
-    tp = tp.sum()
-    fp = fp.sum()
-    fn = fn.sum()
+    pred = torch.from_numpy(pred)
+    gt = torch.from_numpy(gt.astype(np.uint8))
+    mask = torch.ones_like(gt)
 
-    f_1 = 2 * tp / (2 * tp + fn + fp)
-    return f_1
+    score = process_one_img(pred, mask, gt, thresholds, logit_input=False)
 
-def jaccard(pr, gt):
-    tp =  pr &  gt
-#    fp =  pr & ~gt
-#    fn = ~pr & gt
+    return score, file
 
-    tp = tp.sum()
-    p = pr.sum()
-    t = gt.sum()
+fnames = list(filter(lambda f: f.endswith('npy'), os.listdir(pr_path)))[:100]
 
-    return tp / (t + p - tp)
-#    fp = fp.sum()
-#    fn = fn.sum()
+pool = mp.Pool()
+means = np.zeros_like(thresholds)
 
-def compute_one(pname):
-    gname = pname[:-4] + '_segmentation.png'
-    gpath = os.path.join(gt_path, gname)
-
-    ppath = os.path.join(pr_path, pname)
-
-    gt = imageio.imread(gpath) == 255
-    pr = np.load(ppath) 
+imap = pool.imap_unordered(job, fnames, chunksize=1)
+scores = []
+for score, fname in tqdm(imap, total=len(fnames)):
+    scores.append((fname, score))
+    print(f'{fname} -> {score}')
     
-    score = jaccard(pr, gt)
-
-    if score >= 0.65:
-        return score
-    else:
-        return 0.
-
-with mp.Pool() as p:
-    scores = p.map(compute_one, os.listdir(pr_path))
-
-    print(np.array(scores).mean())
+for p, s in scores:
+    if 0.55 < s < 0.75:
+        print(p)
+#means = np.stack(scores).mean(axis=0)
+#argmax = means.argmax()
+#print('best iou', means[argmax], 'at', thresholds[argmax])

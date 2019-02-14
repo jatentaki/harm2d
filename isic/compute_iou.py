@@ -3,32 +3,17 @@ import multiprocessing as mp
 import numpy as np
 from tqdm import tqdm
 
-from isic_f1 import process_one_img
+from isic_f1 import process_one_img, postprocess
 
-#gt_path = '~/Storage/jatentaki/Datasets/isic2018/lbls'
-gt_path = '/cvlabdata2/cvlab/datasets_tyszkiewicz/isic2018/train/lbls'
-pr_path = '/cvlabdata2/home/tyszkiew/full_size_raw'
+gt_path = '/cvlabdata2/cvlab/datasets_tyszkiewicz/isic2018/test/lbls/'
+pr_path = '/cvlabdata2/home/tyszkiew/full_size_iou_jitter_rayleigh_flip/'
+save_path = '/cvlabdata2/home/tyszkiew/test_postprocessed/'
+#save_path = '~/test_postprocessed'
 
-def compute_one(pname):
-    gname = pname[:-4] + '_segmentation.png'
-    gpath = os.path.join(gt_path, gname)
+thresholds = np.array([0.52])#np.linspace(0.3, 0.7, 10)
 
-    ppath = os.path.join(pr_path, pname)
-
-    gt = imageio.imread(gpath) == 255
-    pr = np.load(ppath) 
-    
-    score = jaccard(pr, gt)
-
-    return score
-    #if score >= 0.65:
-    #    return score
-    #else:
-    #    return 0.
-
-thresholds = np.array([0.6])#np.linspace(0.2, 0.8, 10)
-def job(file):
-    pred = np.load(os.path.join(pr_path, file))['seg']
+def calculate_job(file):
+    pred = np.load(os.path.join(pr_path, file))
     seg_fname = file[:-4] + '_segmentation.png'
     gt = imageio.imread(os.path.join(gt_path, seg_fname)) == 255
 
@@ -36,29 +21,32 @@ def job(file):
     gt = torch.from_numpy(gt.astype(np.uint8))
     mask = torch.ones_like(gt)
 
-    score = process_one_img(pred, mask, gt, thresholds)
+    score = process_one_img(pred, mask, gt, thresholds, logit_input=False)
 
     return score, file
 
-fnames = list(filter(lambda f: f.endswith('npz'), os.listdir(pr_path)))[:100]
+def save_job(file):
+    pred = np.load(os.path.join(pr_path, file))
+    pred = pred > 0.52
+    postprocessed = postprocess(pred)
+    postprocessed = postprocessed.astype(np.uint8) * 255
+    save_p = os.path.join(save_path, file[:-3] + 'png')
+    
+    imageio.imwrite(save_p, postprocessed)
 
+fnames = list(filter(lambda f: f.endswith('npy'), os.listdir(pr_path)))
+
+#list(map(save_job, fnames))
 pool = mp.Pool()
-means = np.zeros_like(thresholds)
-n = 0
 
-imap = pool.imap_unordered(job, fnames, chunksize=1)
-scores = dict()
-for score, fname in tqdm(imap, total=len(fnames)):
-    #means += iou
-    #n += 1
-    scores[fname] = score
+imap = pool.imap_unordered(save_job, fnames, chunksize=1)
+for _ in tqdm(imap, total=len(fnames)):
+    pass
 
-for name, score in scores.items():
-    if score < 0.7:
-        print(name, score)
-
-#means /= n
-#
+#scores = []
+#for score, fname in tqdm(imap, total=len(fnames)):
+#    scores.append(score)
+#    
+#means = np.stack(scores).mean(axis=0)
 #argmax = means.argmax()
 #print('best iou', means[argmax], 'at', thresholds[argmax])
-#print(np.stack(ious).mean(axis=0))
