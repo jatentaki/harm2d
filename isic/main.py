@@ -12,7 +12,7 @@ import loader
 
 # parent directory
 sys.path.append('..')
-import losses, framework, hunet, unet
+import losses, framework, hunet, unet, relu
 import criteria as criteria_mod
 from utils import size_adaptive_
 from criteria import PrecRec
@@ -40,6 +40,8 @@ if __name__ == '__main__':
                         help='run optimization pass in jit')
 
     # learning paramters
+    parser.add_argument('--cut-data', metavar='N', default=None, type=int,
+                        help='restrict dataset to N examples')
     parser.add_argument('-b', '--batch-size', metavar='N', default=1, type=int,
                         help='batch size')
     parser.add_argument('-bm', '--batch-multiplier', metavar='N', default=1, type=int,
@@ -56,8 +58,6 @@ if __name__ == '__main__':
     # other
     parser.add_argument('-s', '--early_stop', default=None, type=int,
                         help='stop early after n batches')
-    parser.add_argument('-tot', '--test-on-train', action='store_true',
-                        help='Run evaluation and inspection on training set')
     parser.add_argument('--logdir', default=None, type=str,
                         help='TensorboardX log directory')
 
@@ -85,7 +85,29 @@ if __name__ == '__main__':
         'bg_weight': 1., 'fg_weight': 1., 'eg_weight': 1.
     }
 
-    train_data = loader.ISICDataset(
+    class CutDataset:
+        def __init__(self, ds, length=None):
+            if length is not None:
+                assert length <= len(ds)
+            self.ds = ds
+            self.length = length
+
+        def __getitem__(self, idx):
+            return self.ds[idx]
+
+        def __len__(self):
+            if self.length is not None:
+                return self.length
+            else:
+                return len(self.ds)
+
+        def factor(self):
+            if self.length is None:
+                return 1
+            else:
+                return len(self.ds) / self.length
+            
+    train_data = CutDataset(loader.ISICDataset(
         args.data_path + '/easy', global_transform=loader.PAD_TRANS_1024,
         img_transform=T.Compose([
             T.ColorJitter(0.1, 0.1, 0.1, 0.05),
@@ -93,23 +115,17 @@ if __name__ == '__main__':
         ]),
         flip=True,
         **loader_weights
-    )
+    ), length=args.cut_data)
+
     train_loader = DataLoader(
-        train_data, batch_size=args.batch_size, shuffle=True,
-        num_workers=args.workers
+        train_data, batch_size=args.batch_size,
+        shuffle=True, num_workers=args.workers
     )
 
-    if args.test_on_train:
-        val_data = loader.ISICDataset(
-            args.data_path + '/train', global_transform=loader.PAD_TRANS_1024,
-            **loader_weights
-        )
-    else:
-        val_data = loader.ISICDataset(
-            args.data_path + '/test', global_transform=loader.PAD_TRANS_1024,
-            **loader_weights
-        )
-
+    val_data = loader.ISICDataset(
+        args.data_path + '/test', global_transform=loader.PAD_TRANS_1024,
+        **loader_weights
+    )
     val_loader = DataLoader(
         val_data, shuffle=False, batch_size=args.batch_size,
         num_workers=args.workers
@@ -117,13 +133,18 @@ if __name__ == '__main__':
 
     down = [(5, 5, 5), (5, 5, 5), (5, 5, 5), (5, 5, 5)]
     up = [(5, 5, 5), (5, 5, 5), (5, 5, 5)]
+
+#    down = [(7, 8)] * 4
+#    up = [(7, 8)] * 3
     if args.model in ('harmonic', 'unconstrained'):
         setup = hunet.default_setup
         if args.dropout is not None:
             dropout = functools.partial(harmonic.d2.Dropout2d, p=args.dropout)
             setup['dropout'] = dropout
 
-        setup['norm'] = harmonic.d2.RayleighNorm2d
+#        setup['norm'] = harmonic.d2.RayleighNorm2d
+        setup['norm'] = harmonic.d2.BatchNorm2d
+#        setup['gate'] = relu.CReLU
         network = hunet.HUnet(in_features=4, down=down, up=up, radius=2, setup=setup)
 
     elif args.model == 'baseline':
@@ -222,19 +243,20 @@ if __name__ == '__main__':
                 writer=writer, early_stop=args.early_stop
             )
 
-            callbacks = [PrecRec(), IsicIoU()]
-            framework.test(
-                network, val_loader, loss_fn, callbacks, epoch, writer=writer,
-                early_stop=args.early_stop,
-            )
+            if epoch % int(train_data.factor()) == 0:
+                callbacks = [PrecRec(), IsicIoU()]
+                framework.test(
+                    network, val_loader, loss_fn, callbacks, epoch, writer=writer,
+                    early_stop=args.early_stop,
+                )
 
-            for callback in callbacks:
-                results = callback.get_dict()
-                for key in results:
-                    writer.add_scalar(f'Test/{key}', results[key], epoch)
+                for callback in callbacks:
+                    results = callback.get_dict()
+                    for key in results:
+                        writer.add_scalar(f'Test/{key}', results[key], epoch)
 
-            scheduler.step(train_loss)
+                scheduler.step(train_loss)
 
-            framework.save_checkpoint(
-                epoch, 0., network, optim, path=args.artifacts
-            )
+                framework.save_checkpoint(
+                    epoch, 0., network, optim, path=args.artifacts
+                )

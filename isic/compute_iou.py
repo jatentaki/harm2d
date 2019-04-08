@@ -5,12 +5,12 @@ from tqdm import tqdm
 
 from isic_f1 import process_one_img, postprocess
 
-gt_path = '/cvlabdata2/cvlab/datasets_tyszkiewicz/isic2018/test/lbls/'
-pr_path = '/cvlabdata2/home/tyszkiew/full_size_iou_jitter_rayleigh_flip/'
-save_path = '/cvlabdata2/home/tyszkiew/test_postprocessed/'
-#save_path = '~/test_postprocessed'
+#gt_path = '/cvlabdata2/cvlab/datasets_tyszkiewicz/isic2018/test/lbls/'
+pr_path = '/cvlabdata2/home/tyszkiew/harmonic_submission_validation_segmentations/'
+#save_path = '/cvlabdata2/home/tyszkiew/harmonic_submission_pngs/'
+save_path='~/harmonic_submission_validation/'
 
-thresholds = np.array([0.52])#np.linspace(0.3, 0.7, 10)
+thresholds = np.linspace(0.3, 0.7, 10)
 
 def calculate_job(file):
     pred = np.load(os.path.join(pr_path, file))
@@ -27,7 +27,7 @@ def calculate_job(file):
 
 def save_job(file):
     pred = np.load(os.path.join(pr_path, file))
-    pred = pred > 0.52
+    pred = pred > 0.47777777777777775
     postprocessed = postprocess(pred)
     postprocessed = postprocessed.astype(np.uint8) * 255
     save_p = os.path.join(save_path, file[:-3] + 'png')
@@ -36,17 +36,19 @@ def save_job(file):
 
 fnames = list(filter(lambda f: f.endswith('npy'), os.listdir(pr_path)))
 
-#list(map(save_job, fnames))
 pool = mp.Pool()
 
 imap = pool.imap_unordered(save_job, fnames, chunksize=1)
 for _ in tqdm(imap, total=len(fnames)):
     pass
 
+#imap = pool.imap_unordered(calculate_job, fnames, chunksize=1)
 #scores = []
 #for score, fname in tqdm(imap, total=len(fnames)):
 #    scores.append(score)
 #    
-#means = np.stack(scores).mean(axis=0)
+#means = np.stack(scores)
+#means[means < 0.65] = 0.
+#means = means.mean(axis=0)
 #argmax = means.argmax()
 #print('best iou', means[argmax], 'at', thresholds[argmax])

@@ -67,7 +67,7 @@ class ISICDataset:
             msg = fmt.format(diff)
             raise AssertionError(msg)
 
-        self.ids = img_ids
+        self.ids = sorted(img_ids)
 
     def fetch_lbl(self, id):
         fmt = self.lbl_p + os.path.sep + 'ISIC_{}_segmentation.png'

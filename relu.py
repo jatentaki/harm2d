@@ -1,6 +1,8 @@
 import torch
 import torch.nn as nn
 
+from torch.utils.checkpoint import checkpoint
+
 from torch_dimcheck import dimchecked
 from harmonic.cmplx import magnitude
 
@@ -18,6 +20,10 @@ class CReLU(nn.Module):
 
     @dimchecked
     def forward(self, x: [2, 'b', 'f', 'h', 'w', ...]) -> [2, 'b', 'f', 'h', 'w', ...]:
+        return checkpoint(self._forward, x)
+        
+    @dimchecked
+    def _forward(self, x: [2, 'b', 'f', 'h', 'w', ...]) -> [2, 'b', 'f', 'h', 'w', ...]:
         magn = magnitude(x).unsqueeze(0)
         normalized = x / (magn + self.eps)
         magn_biased = magn - self.bias

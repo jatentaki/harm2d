@@ -69,7 +69,7 @@ elif args.model == 'baseline':
 
     down = [unet.repr_to_n(d) for d in down]
     up = [unet.repr_to_n(d) for d in up]
-    network = unet.Unet(up=up, down=down, in_features=3, setup=setup)
+    network = unet.Unet(up=up, down=down, in_features=4, setup=setup)
 
 cuda = torch.cuda.is_available()
 

@@ -96,6 +96,8 @@ def process_one_img(prediction, mask, target, thresholds, logit_input=True):
 
         iou = inter / (union_2 - inter)
 
+        iou = 0. if iou < 0.65 else iou
+
         ious[th_i] = iou
     
     return ious

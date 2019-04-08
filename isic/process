@@ -1,8 +1,9 @@
 #! /usr/bin/env bash
-DATA=/cvlabdata2/cvlab/datasets_tyszkiewicz/isic2018/test/imgs/
+DATA=~/ISIC2018_Task1-2_Validation_Input/
+#DATA=/cvlabdata2/cvlab/datasets_tyszkiewicz/isic2018/test/imgs
 MEAN=/cvlabdata2/cvlab/datasets_tyszkiewicz/isic2018/mean.npy
-ART=/cvlabdata2/home/tyszkiew/full_size_iou_jitter_rayleigh_flip
-LOAD=spatial_prior/easy_jitter_rayleigh_flip/epoch59.pth.tar
+ART=/cvlabdata2/home/tyszkiew/harmonic_submission_validation_segmentations
+LOAD=harmonic_submission/epoch58.pth.tar
 B=2
 J=4
 python process.py $DATA $MEAN $ART $LOAD harmonic -j $J
